@@ -70,10 +70,14 @@ export function SearchResults({ results, query }: SearchResultsProps) {
                                     <BookOpen className="h-4 w-4 text-muted-foreground" />
                                     <div className="flex flex-col overflow-hidden min-w-0">
                                         <div className="flex items-center gap-2">
-                                            <span className="text-sm font-medium">Page {match.page_number}</span>
+                                            {/* Show page numbers for PDFs */}
+                                            {(group.filename.toLowerCase().endsWith('.pdf') ||
+                                                group.filename.toLowerCase().endsWith('.pdf.txt')) && (
+                                                    <span className="text-sm font-medium">Page {match.page_number}</span>
+                                                )}
                                             <span className="text-xs text-muted-foreground">• Sent #{match.sentence_id}</span>
                                         </div>
-                                        <p className="text-xs text-muted-foreground truncate italic">
+                                        <p className="text-xs text-muted-foreground whitespace-pre-wrap break-words italic">
                                             {match.sentence_text || "Match found"}
                                         </p>
                                     </div>

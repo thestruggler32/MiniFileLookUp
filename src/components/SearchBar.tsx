@@ -99,7 +99,7 @@ export function SearchBar({ onSearch, onQueryChange, suggestions = [], isSearchi
                                 className="px-4 py-3 hover:bg-muted/50 cursor-pointer flex items-center text-sm transition-colors"
                             >
                                 <Search className="mr-3 h-4 w-4 text-muted-foreground" />
-                                <span dangerouslySetInnerHTML={{ __html: suggestion.replace(new RegExp(`(${query})`, 'gi'), '<span class="font-bold text-primary">$1</span>') }} />
+                                <span dangerouslySetInnerHTML={{ __html: suggestion.replace(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'), '<span class="font-bold text-primary">$1</span>') }} />
                             </li>
                         ))}
                     </ul>

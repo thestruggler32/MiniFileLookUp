@@ -53,6 +53,8 @@ def _extract_txt(filepath):
                 content = f.read()
                 # Check for null bytes to avoid binary files
                 if content.count('\x00') < (len(content) / 2):
+                    # Normalize smart quotes  in extracted content to match api.py normalization
+                    content = content.replace("'", "'").replace("'", "'").replace(""", '"').replace(""", '"')
                     return content
         except (UnicodeDecodeError, LookupError):
             continue
@@ -92,16 +94,27 @@ def _extract_docx_with_pages(filepath):
     try:
         doc = Document(filepath)
         current_page = 1
+        char_count = 0
+        CHARS_PER_PAGE = 3000 # Heuristic fallback
         
         for paragraph in doc.paragraphs:
-            # Check for page break markers in XML
-            # This handles breaks inserted by Word layout or manual breaks
-            if paragraph._element.xml and ('lastRenderedPageBreak' in paragraph._element.xml or 'w:br w:type="page"' in paragraph._element.xml):
-                current_page += 1
+            # Check for explicitly marked page breaks
+            has_break = False
+            if paragraph._element.xml:
+                if 'lastRenderedPageBreak' in paragraph._element.xml or 'w:br w:type="page"' in paragraph._element.xml:
+                    current_page += 1
+                    char_count = 0
+                    has_break = True
             
-            # Append text with current page marker if it has content
-            if paragraph.text.strip():
-                chunks.append(f"[PAGE:{current_page}] {paragraph.text}")
+            text = paragraph.text.strip()
+            if text:
+                # Fallback: If no explicit break but we exceeded char limit
+                if not has_break and char_count > CHARS_PER_PAGE:
+                    current_page += 1
+                    char_count = 0
+                
+                chunks.append(f"[PAGE:{current_page}] {text}")
+                char_count += len(text)
                 
     except Exception as e:
         logging.error(f"DOCX error: {e}")
@@ -109,12 +122,26 @@ def _extract_docx_with_pages(filepath):
     return "\n".join(chunks)
 
 def _extract_csv(filepath):
-    text = []
+    """
+    Structured CSV: [ROW] Key: Value | format for precise search.
+    """
+    import csv
+    text_rows = []
+    
     try:
-        with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
-            reader = csv.reader(f)
+        with open(filepath, 'r', encoding='utf-8-sig', errors='replace') as f:
+            reader = csv.DictReader(f)
             for row in reader:
-                text.append(" ".join(row))
+                row_str = "[ROW] " + " | ".join([
+                    f"{k}: {v}" for k, v in row.items() if v.strip()
+                ]) + " [ENDROW]"
+                text_rows.append(row_str)
     except Exception as e:
         logging.error(f"CSV error: {e}")
-    return "\n".join(text)
+        try:
+            # Fall back to plain text
+            with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                return f.read()
+        except:
+            return ""
+    return "\n".join(text_rows)

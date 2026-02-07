@@ -1,3 +1,80 @@
+/*
+ * ============================================================================
+ * INVERTED INDEX IMPLEMENTATION
+ * ============================================================================
+ *
+ * FILE: index.c
+ * DESCRIPTION: Core inverted index data structure for fast keyword search
+ *
+ * WHAT IS AN INVERTED INDEX?
+ * --------------------------
+ * An inverted index is a data structure that maps words to their locations
+ * in documents. It's called "inverted" because instead of mapping documents
+ * to words (like a normal index), it maps words to documents.
+ *
+ * Example:
+ * --------
+ * Document 1: "hello world"
+ * Document 2: "hello there"
+ *
+ * Inverted Index:
+ * "hello" -> [Doc1, Doc2]
+ * "world" -> [Doc1]
+ * "there" -> [Doc2]
+ *
+ * IMPLEMENTATION DETAILS:
+ * ----------------------
+ * This implementation uses a HASH TABLE for O(1) average case lookup:
+ *
+ * 1. HASH FUNCTION (DJB2):
+ *    - Converts word string to integer hash value
+ *    - Formula: hash = hash * 33 + char
+ *    - Fast and provides good distribution
+ *
+ * 2. HASH TABLE STRUCTURE:
+ *    - Array of buckets (default size: 1024)
+ *    - Each bucket is a linked list of IndexEntry nodes
+ *    - Handles collisions via chaining
+ *
+ * 3. INDEX ENTRY:
+ *    - word: The indexed keyword (normalized to lowercase)
+ *    - occurrences: Linked list of Occurrence nodes
+ *    - next: Pointer to next entry in bucket (for collision handling)
+ *
+ * 4. OCCURRENCE NODE:
+ *    - file_id: Which document contains this word
+ *    - sentence_id: Which sentence/paragraph in the document
+ *    - page_number: Which page (for PDF/DOCX support)
+ *    - position: Word position within sentence (for phrase search)
+ *    - sentence_offset: Byte offset in file (for quick retrieval)
+ *    - sentence_len: Length of sentence in bytes
+ *    - frequency: How many times word appears in this sentence
+ *    - next: Pointer to next occurrence
+ *
+ * KEY OPERATIONS:
+ * --------------
+ * - create_index(size): Initialize hash table with given size
+ * - index_word(...): Add word occurrence to index
+ * - search_keyword(word): Find all occurrences of a word (O(1) avg)
+ * - search_sentence(phrase): Find multi-word phrases (O(n*m))
+ * - free_index(): Clean up all allocated memory
+ *
+ * PERFORMANCE:
+ * -----------
+ * - Keyword search: O(1) average case, O(n) worst case (all collisions)
+ * - Phrase search: O(n*m) where n = docs, m = query words
+ * - Memory: O(V + O) where V = vocabulary size, O = total occurrences
+ *
+ * USAGE EXAMPLE:
+ * -------------
+ * InvertedIndex *idx = create_index(1024);
+ * index_word(idx, "hello", file_id=1, sentence_id=1, page=1, ...);
+ * Occurrence *results = search_keyword(idx, "hello");
+ * // results now contains all occurrences of "hello"
+ *
+ * ============================================================================
+ */
+
 #include "../include/index.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -30,9 +107,10 @@ InvertedIndex *create_index(int size) {
 }
 
 // FIX 1: Added 'int page_number' to match header and fix "undeclared variable"
-// error
+// error FIX 2: Added sentence_offset and sentence_len
 void index_word(InvertedIndex *idx, const char *word, int file_id,
-                int sentence_id, int page_number, int position) {
+                int sentence_id, int page_number, long sentence_offset,
+                int sentence_len, int position) {
   if (!idx || !word)
     return;
 
@@ -94,6 +172,8 @@ void index_word(InvertedIndex *idx, const char *word, int file_id,
   new_occ->file_id = file_id;
   new_occ->sentence_id = sentence_id;
   new_occ->page_number = page_number;
+  new_occ->sentence_offset = sentence_offset; // Store offset
+  new_occ->sentence_len = sentence_len;       // Store length
   new_occ->frequency = 1;
   new_occ->capacity = 4;
   new_occ->positions = (int *)malloc(new_occ->capacity * sizeof(int));
@@ -124,10 +204,12 @@ Occurrence *search_sentence(InvertedIndex *idx, const char *query) {
   char *q_copy = strdup(query);
   char *tokens[64];
   int token_count = 0;
-  char *token = strtok(q_copy, " \t\n");
+  // main.c uses: " \t\n\r,;:\"()[]{}!?.+=<>|&^%*-~'"
+  // We add .?! to ensure they are stripped from the query token
+  char *token = strtok(q_copy, " \t\n\r,;:\"()[]{}!?.+=<>|&^%*-~'");
   while (token && token_count < 64) {
     tokens[token_count++] = token;
-    token = strtok(NULL, " \t\n");
+    token = strtok(NULL, " \t\n\r,;:\"()[]{}!?.+=<>|&^%*-~'");
   }
 
   if (token_count == 0) {
@@ -185,6 +267,8 @@ Occurrence *search_sentence(InvertedIndex *idx, const char *query) {
         new_node->file_id = curr->file_id;
         new_node->sentence_id = curr->sentence_id;
         new_node->page_number = curr->page_number;
+        new_node->sentence_offset = curr->sentence_offset; // Copy offset
+        new_node->sentence_len = curr->sentence_len;       // Copy length
         new_node->frequency = 1;    // It's a phrase match count
         new_node->positions = NULL; // Not needed for result display
         new_node->capacity = 0;

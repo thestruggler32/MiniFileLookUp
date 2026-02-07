@@ -14,22 +14,25 @@ function formatBytes(bytes: number, decimals = 2) {
 
 export function IndexedFiles() {
     const [files, setFiles] = useState<FileMetadata[]>([]);
+    const [hasLoaded, setHasLoaded] = useState(false);
 
     useEffect(() => {
         async function fetch() {
             try {
                 const data = await listFiles();
                 setFiles(data);
+                setHasLoaded(true);
             } catch (e) {
                 console.error("Failed to fetch files", e);
             }
         }
         fetch();
-        const interval = setInterval(fetch, 5000); // Poll every 5s
+        const interval = setInterval(fetch, 10000); // Poll every 10s (reduced flicker)
         return () => clearInterval(interval);
     }, []);
 
-    if (files.length === 0) return null;
+    // Only hide before first load, not during refreshes
+    if (!hasLoaded) return null;
 
     return (
         <Card>

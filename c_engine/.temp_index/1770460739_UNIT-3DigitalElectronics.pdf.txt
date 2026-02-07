@@ -1,0 +1,583 @@
+[PAGE:1] UNIT  __MINUS__  IV 
+ 
+DIGITAL LOGIC  
+Digital Logic:        
+Boolean Algebra, Basic and Universal Logic gates, Half 
+adder, Full adder, Simplification of logic expressions using K __MINUS__ 
+maps, Multiplexer, De __MINUS__ multiplexer, Encoder and Decoder. 
+BOOLEAN ALGEBRA 
+George Boole in 1854 invented a new kind of algebra known 
+as Boolean algebra. It is sometimes called switching algebra. 
+Boolean algebra is the mathematical frame work on which 
+logic design based. It is used in synthesis  __AMP__  analysis of binary 
+logical function. 
+Laws of Boolean Algebra: 
+1. 0’ __EQ__ 1 
+2. 1’ __EQ__ 0 
+3. If A __EQ__ 0, A’ __EQ__ 1 
+4. IF A __EQ__ 1, A’ __EQ__ 0 
+5. A’’ __EQ__ A 
+6. A.0 __EQ__ 0 
+7. A.1 __EQ__ A 
+8. A.A __EQ__ A 
+9. A.A’ __EQ__ 0 
+10. A __PLUS__ 0 __EQ__ A 
+11. A __PLUS__ 1 __EQ__ 1 
+[PAGE:2] 12. A __PLUS__ A __EQ__ A 
+13. A __PLUS__ A’ __EQ__ 1 
+14. A __PLUS__ AB __EQ__ A(1 __PLUS__ B) __EQ__ A 
+15. A __PLUS__ A’B __EQ__ A __PLUS__ AB __PLUS__ A’B __EQ__ A __PLUS__ B(A __PLUS__ A’) __EQ__ A __PLUS__ B 
+LOGIC GATES 
+• It is an electronic circuit which makes logic decisions. 
+A logic gate is a digital circuit with one or more input 
+signal and only one output signal. All input or output 
+signals either low voltage or high voltage. A digital 
+circuit is referred to as logic gate for simple reason i.e. 
+it can be analyzed on the basis of Boolean algebra. 
+• To make logical decisions, three gates are used. They 
+are OR, AND and NOT gate. These logic gates are 
+building blocks which are available in the form of IC. 
+• The input and output of the binary variables for each 
+gate can be represented in a tabular column or truth 
+table. 
+1. OR Gate: The OR gate performs logical additions 
+commonly known as OR function. The OR gate has two or 
+more inputs and only one output. The operation of OR gate is 
+such that a HIGH(1) on the output is produced when any of 
+the input is HIGH. The output is LOW(0) only when all the 
+inputs are LOW.  
+•  If A  __AMP__  B are the input variables of an OR gate and c 
+is its output, then A __PLUS__ B. similarly for more than two 
+[PAGE:3] variables, the OR function can be expressed as 
+Y __EQ__ A __PLUS__ B __PLUS__ C.  
+• Logical Symbol: 
+ 
+ 
+ 
+• Truth table 
+ 
+Input  Output  
+A  B  Y __EQ__  A __PLUS__ B  
+0  0  0  
+0  1  1  
+1  0  1  
+1  1  1  
+ 
+ 
+ 
+ 
+Y
+A
+B
+[PAGE:4] Realization of OR gate using diodes 
+• Two input OR gate using "diode __MINUS__ resistor" logic is 
+shown in figure below. Where X, Y are the inputs and 
+F is the output. 
+                  
+ 
+Fig 5.1: OR gate using diodes 
+2. AND Gate : The AND gate performs logical multiplication, 
+commonly known as AND function. The AND gate has two or 
+more inputs and a single output. The output of an AND gate is 
+HIGH only when all the inputs are HIGH. Even if any one of 
+the input is LOW, the output will be LOW. If a  __AMP__  b are input 
+variables of an AND gate and c is its output, then Y __EQ__ A.B 
+Logic Symbol 
+ 
+B
+YA
+[PAGE:5] Truth table 
+Input Output 
+A B Y __EQ__ A.B 
+0 0 0 
+0 1 0 
+1 0 0 
+1 1 1 
+ 
+Realization of AND gate using diodes  
+• Two input AND gate using "diode  __MINUS__ resistor" logic is 
+shown in figure below. Where X, Y are inputs and F is 
+the output. 
+                                 
+Fig 5.2AND gate using diodes 
+
+[PAGE:6] 3. Not Gate ( Inverter):  The NOT gate performs the basic 
+logical function called inversion or complementation. The 
+purpose of this gate is to convert one logic level into the 
+opposite logic level. It has one input and one output. When a 
+HIGH level is applied to an inverter, a LOW  level appears at 
+the output and vice __MINUS__ versa. 
+ 
+ 
+ 
+ 
+ 
+ 
+
+[PAGE:7] 4.NAND Gate: The output of a NAND gate is LOW only when 
+all inputs are HIGH and output of the NAND is HIGH if one or 
+more inputs are LOW. 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+Y
+A
+B
+
+[PAGE:8] 5. NOR Gate: The output of the NOR gate is HIGH only when 
+all the inputs are LOW. 
+ 
+ 
+A
+B
+Y
+
+[PAGE:9] 6.XOR Gate or Exclusive OR gate: In this gate output is 
+HIGH only when any one of the input is HIGH. The circuit is 
+also called as inequality comparator, because it produces output 
+when two inputs are different. When both the inputs are high, 
+then the output is low. 
+ 
+A
+B Y
+
+[PAGE:10] 7. XNOR Gate or Exclusive NOR Gate: An XNOR gate is 
+a gate with two or more inputs and one output. XNOR 
+operation is complimentary of  XOR operation. i.e. The 
+output of XNOR gate is High, when all the inputs are 
+identical; otherwise it is low. 
+ 
+ 
+ 
+ 
+ 
+ 
+A
+B
+Y
+
+[PAGE:11] Universal Logic Gate 
+NAND and NOR gates are called Universal gates or Universal 
+building blocks, because both can be used to implement any 
+gate like AND,OR an NOT gates or any combination of these 
+basic gates.  
+  
+[PAGE:12] NAND gate as Universal gate 
+ 
+ 
+
+[PAGE:13] NOR gate as Universal gate:
+
+[PAGE:14]  
+ 
+
+[PAGE:15]  
+De Morgan’s Theorems: 
+It is one of the important properties of Boolean algebra. It is 
+extensively useful in simplifying complex Boolean expression. 
+
+[PAGE:16] Theorem 1: It states that “the compliments of product of two 
+variables equal to sum of the compliments of individual 
+variable”. 
+ 
+ 
+YXYX  __PLUS__  __EQ__ •
+[PAGE:17] Theorem 2: It states that compliment of sum of two variables 
+is equal to product of compliment of two individual variables. 
+ 
+ 
+ 
+ 
+ 
+1. RealizeEXOR Gate using only minimum 
+NAND Gates 
+ 
+ 
+YXYX • __EQ__  __PLUS__ 
+[PAGE:18] 2. RealizeEXOR Gate using only NOR Gates 
+XNOR  __PLUS__  NOR  __EQ__  XOR i.e. Add NOR gate to the ouptut 
+of XNOR gate. Here is the boolean algebra for XOR 
+gate: 
+ 
+ 
+ 
+ 
+ 
+ 
+
+[PAGE:19] 3. RealizeEX __MINUS__ NOR Gate using only minimum 
+NOR Gates 
+ 
+4. RealizeEX __MINUS__ NOR Gate using only NAND 
+Gates 
+XOR  __PLUS__  NAND Inverter(NOT)  __EQ__  XNOR i.e. Add NOT Gate 
+to the output of XOR gate as shown in the image above. 
+Here is the boolean algebra for XNOR gate: 
+ 
+ 
+
+[PAGE:20]  
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+
+[PAGE:21] Half Adder:  
+A combinational circuit which performs the arithmetic 
+addition of two binary digits is called Half Adder. In the half 
+adder circuit, there are two inputs, one is addend and augends 
+and two outputs are Sum and Carry. 
+ 
+ 
+ 
+ 
+ 
+ 
+A
+B
+Sum
+Carry
+Half Adder
+[PAGE:22] Logic Expression :
+ 
+Circuit Symbol of Half adder: 
+ 
+
+[PAGE:23]  
+Full Adder: The full adder is a combinational circuit that 
+performs the arithmetic sum of three input bits. 
+• It consists of three inputs and two outputs. Two of the 
+inputs are variables, denoted by A and B, represent the 
+two significant bit to be added. The third input C in 
+represents carry form the previous lower significant 
+position. 
+Truth Table for Full Adder  
+ 
+A
+B
+Cin
+Full Adder
+Sum
+Carry
+[PAGE:24]  
+ 
+
+[PAGE:25]  
+ 
+ 
+
+[PAGE:26] Full adder Circuit using two Half adders: 
+ 
+ 
+ 
+Fig 5.4:Full adder Circuit using two Half adders 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+
+[PAGE:27] SIMPLIFICATION USING BOOLEANALGEBRA 
+A simplified Boolean expression uses the 
+fewest gates possibleto implement a 
+givenexpression. 
+ 
+Example 
+Using Boolean algebra techniques, 
+simplify 
+thisexpression:  
+AB  __PLUS__  A(B  __PLUS__  C)  __PLUS__  B(B  __PLUS__ C) 
+Solution 
+Step 1: Apply the distributive law to the second 
+and third terms inthe expression, asfollows: 
+AB  __PLUS__  AB  __PLUS__  AC  __PLUS__  BB  __PLUS__ BC 
+Step 2: Apply rule 7 (BB  __EQ__  B) to the fourthterm. 
+AB  __PLUS__  AB  __PLUS__  AC  __PLUS__  B  __PLUS__ BC 
+Step 3: Apply rule 5 (AB  __PLUS__  AB  __EQ__  AB) to the 
+first twoterms. 
+AB  __PLUS__  AC  __PLUS__  B  __PLUS__ BC 
+Step 4: Apply rule 10 (B  __PLUS__  BC  __EQ__  B) to the last 
+twoterms. 
+[PAGE:28] AB  __PLUS__  AC  __PLUS__ B 
+Step 5: Apply rule 10 (AB  __PLUS__  B  __EQ__  B) to the first and 
+thirdterms. 
+B __PLUS__ AC 
+At this point the expression is simplified as much 
+aspossible. 
+ 
+ 
+Boolean Algebra Practice Problems  
+ 
+
+[PAGE:29]  
+Solutions to the Boolean Algebra PracticeProblems 
+ 
+  
+
+[PAGE:30]  
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+[PAGE:31] •Draw a logic circuit for (A  __PLUS__  B)C.  
+Soln: 
+ 
+•Draw a logic circuit for A  __PLUS__  BC  __PLUS__  D.  
+Soln: 
+  
+  
+•Draw a logic circuit for AB  __PLUS__  AC.  
+Soln: 
+ 
+ 
+ 
+ 
+
+[PAGE:32] •Draw a logic circuit for (A  __PLUS__  B)(C  __PLUS__  D)C.  
+Soln:  
+ 
+ MULTIPLEXER (MUX) 
+•A MUX is a digital switchthat has multiple inputs(sources) and a 
+singleoutput (destination). 
+•The select linesdetermine which input is connected to the output 
+•MUXTypes 
+2 __MINUS__ to __MINUS__ 1(1selectline) 
+4 __MINUS__ to __MINUS__ 1(2selectlines) 
+8 __MINUS__ to __MINUS__ 1(3selectlines) 
+16 __MINUS__ to __MINUS__ 1(4selectlines) 
+•Normally there are 2n input lines and n select lines 
+•The basic multiplexer has several data input lines and a single 
+output line and hence the name ‘Many to One’. 
+
+[PAGE:33]  
+➢ 2:1 Mux 
+•2:1 Mux contains 2 input lines, 1 select line and one output line 
+ 
+Fig 5.8: 2:1 MUX 
+ 
+ 
+➢ 4:1 MUX 
+
+[PAGE:34] •4:1 MUX contains 4 input lines, 2 select lines and one input line 
+ 
+               Logic Symbol  
+Truth Table 
+S0 S1 Y 
+0 0 D0 
+0 1 D1 
+1 0 D2 
+1 1 D3 
+ 
+
+[PAGE:35]  
+Logic Expression:  
+Y __EQ__   S0’ S1’D0  __PLUS__ S0’ S1 D1  __PLUS__ S0 S1’ D2 __PLUS__  S0 S1 D3 
+No of AND Gates : 04 
+No of NOT Gates : 02 
+No of OR Gates   :  01 
+Total Gates          :  07 
+DEMULTIPEXER (De __MINUS__ MUX) 
+•A DEMUX is a digital switch with a single input(source) and a 
+multiple outputs (destinations). 
+•The select lines determine which output the input is connected 
+to. The selection of specific output is controlled by the values of ‘n’ 
+select lines. 
+•DEMUX Types 
+1 __MINUS__ to __MINUS__ 2(1selectline) 
+1 __MINUS__ to __MINUS__ 4(2selectlines) 
+1 __MINUS__ to __MINUS__ 8(3selectlines) 
+1 __MINUS__ to __MINUS__ 16(4selectlines) 
+
+[PAGE:36]  
+ 1:4 DEMUX: 
+Input  __EQ__  01 
+Select lines ‘n’ __EQ__  2 
+Outputs  __EQ__  2n  __EQ__  4 
+Logic symbol: 
+ 
+ 
+ 
+ 
+
+[PAGE:37] Truth Table: 
+ 
+Logic Expression:  
+D0 __EQ__ S0’ S1’ X 
+D1 __EQ__  S0’ S1 X 
+D2 __EQ__  S0 S1’ X 
+D3 __EQ__  S0 S1 X 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+
+[PAGE:38] 1: 4 DEMUX Circuit: 
+ 
+•No of Gates for 1:4 DEMUX 
+AND Gates __EQ__  04 
+NOT Gates  __EQ__  02 
+ 
+ENCODERS: 
+• Device which converts one binary code to another 
+• Multiple inputs , multiple outputs 
+• Converts complex to simplest form 
+• More inputs, less outputs 
+
+[PAGE:39] DECODER 
+• Device which transforms the coded bits to generate the original 
+data again 
+• Multiple inputs multiple output logic circuit 
+• It converts coded inputs into coded outputs, where the inputs 
+and outputs are different 
+• Less inputs with more outputs 
+• It takes in ‘n’ input and gives out 2n outputs 
+2 to 4 Decoder Logic symbol and Truth table: 
+ 
+ 
+
+[PAGE:40]   
+
+[PAGE:41]  3 to 8 decoder:   (Binary to Octal Converter)
+ 
+  
+A2 A1 A0 D0 D1 D2 D3 D4 D5 D6 D7 
+0 0 0 1 0 0 0 0 0 0 0 
+0 0 1 0 1 0 0 0 0 0 0 
+0 1 0 0 0 1 0 0 0 0 0 
+0 1 1 0 0 0 1 0 0 0 0 
+1 0 0 0 0 0 0 1 0 0 0 
+1 0 1 0 0 0 0 0 1 0 0 
+1 1 0 0 0 0 0 0 0 1 0 
+1 1 1 0 0 0 0 0 0 0 1 
+ 
+[PAGE:42] Circuit diagram for 3 to 8 decoder: 
+ 
+2 variable K __MINUS__ maps 
+There are 4 cells (22) in the 2 __MINUS__ variable k __MINUS__ map. It will look like (see 
+below image) 
+  
+
+[PAGE:43] The possible min terms with 2 variables (A and B) are A.B, A.B’, 
+A’.B and A’.B’. The conjunctions of the variables (A, B) and (A’, B) 
+are represented in the cells of the top row and (A, B’) and (A’, B’) in 
+cells of the bottom row. The following table shows the positions of 
+all the possible outputs of 2 __MINUS__ variable Boolean function on a K __MINUS__ map. 
+ 
+A general representation of a 2 variable K __MINUS__ map plot is shown 
+below. 
+ 
+  
+When we are simplifying a Boolean equation using Karnaugh map, 
+we represent the each cell of K __MINUS__ map containing the conjunction 
+term with 1. After that, we group the adjacent cells with possible 
+sizes as 2 or 4. In case of larger k __MINUS__ maps, we can group the variables 
+in larger sizes like 8 or 16. 
+The groups of variables should be in rectangular shape, that means 
+the groups must be formed by combining adjacent cells either 
+vertically or horizontally. Diagonal shaped or L __MINUS__ shaped groups are 
+not allowed. The following example demonstrates a K __MINUS__ map 
+simplification of a 2 __MINUS__ variable Boolean equation. 
+[PAGE:44] Example 
+Simplify the given 2 __MINUS__ variable Boolean equation by using K __MINUS__ map. 
+F  __EQ__  X Y’  __PLUS__  X’ Y  __PLUS__  X’Y’ 
+First, let’s construct the truth table for the given equation, 
+ 
+  
+We put 1 at the output terms given in equation. 
+ 
+  
+In this K __MINUS__ map, we can create 2 groups by following the rules for 
+grouping, one is by combining (X’, Y) and (X’, Y’) terms and the 
+other is by combining (X, Y’) and (X’, Y’) terms. Here the lower right 
+cell is used in both groups. 
+After grouping the variables, the next step is determining the 
+minimized expression. 
+By reducing each group, we obtain a conjunction of the minimized 
+expression such as by taking out the common terms from two 
+groups, i.e. X’ and Y’. So the reduced equation will be X’  __PLUS__ Y’. 
+[PAGE:45] 3 variable K __MINUS__ maps 
+For a 3 __MINUS__ variable Boolean function, there is a possibility of 8 output 
+min terms. The general representation of all the min terms using 3 __MINUS__ 
+variables is shown below. 
+ 
+A typical plot of a 3 __MINUS__ variable K __MINUS__ map is shown below. It can be 
+observed that the positions of columns 10 and 11 are interchanged 
+so that there is only change in one variable across adjacent cells. 
+This modification will allow in minimizing the logic. 
+ 
+ 
+Up to 8 cells can be grouped in case of a 3 __MINUS__ variable K __MINUS__ map with 
+other possibilities being 1,2 and 4. 
+
+[PAGE:46] Example 
+Simplify the given 3 __MINUS__ variable Boolean equation by using k __MINUS__ map. 
+F  __EQ__  X’ Y Z  __PLUS__  X’ Y’ Z  __PLUS__  X Y Z’  __PLUS__  X’ Y’ Z’  __PLUS__  X Y Z  __PLUS__  X Y’ Z’ 
+First, let’s construct the truth table for the given equation, 
+ 
+  
+We put 1 at the output terms given in equation. 
+There are 8 cells (23) in the 3 __MINUS__ variable k __MINUS__ map. It will look like (see 
+below image). 
+The largest group size will be 8 but we can also form the groups of 
+size 4 and size 2, by possibility. In the 3 variable Karnaugh map, we 
+consider the left most column of the k __MINUS__ map as the adjacent column 
+of rightmost column. So the size 4 group is formed as shown 
+below. 
+[PAGE:47]  
+ 
+And in both the terms, we have ‘Y’ in common. So the group of size 
+4 is reduced as the conjunction Y. To consume every cell which has 
+1 in it, we group the rest of cells to form size 2 group, as shown 
+below. 
+ 
+  
+The 2 size group has no common variables, so they are written 
+with their variables and its conjugates. So the reduced equation 
+will be X Z’  __PLUS__  Y’  __PLUS__  X’ Z. In this equation, no further minimization is 
+possible. 
+ 
+[PAGE:48] 4 variable K __MINUS__ maps 
+There are 16 possible min terms in case of a 4 __MINUS__ variable Boolean 
+function. The general representation of minterms using 4 variables 
+is shown below.
+ 
+ 
+ 
+ 
+ 
+ 
+
+[PAGE:49]  A typical 4 __MINUS__ variable K __MINUS__ map plot is shown below. It can be observed 
+that both the columns and rows of 10 and 11 are interchanged. 
+  
+The possible number of cells that can be grouped together are 1, 2, 
+4, 8 and 16. 
+Example 
+Simplify the given 4 __MINUS__ variable Boolean equation by using k __MINUS__ map. F 
+(W, X, Y, Z)  __EQ__  (1, 5, 12, 13) 
+Sol: F (W, X, Y, Z)  __EQ__  (1, 5, 12, 13) 
+ 
+  
+By preparing k __MINUS__ map, we can minimize the given Boolean equation 
+as   F  __EQ__  W Y’ Z  __PLUS__  W ‘Y’ 
+Z                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 

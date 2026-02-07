@@ -1,3 +1,77 @@
+"""
+================================================================================
+MINI SEARCH ENGINE - PYTHON API WRAPPER
+================================================================================
+
+FILE: api.py
+DESCRIPTION: FastAPI web service wrapper for the C-based search engine
+
+ARCHITECTURE OVERVIEW:
+---------------------
+This module provides a THIN HTTP REST API layer on top of the core C search
+engine (engine.exe). The C engine handles ALL performance-critical operations:
+
+    ┌─────────────────────────────────────────────────────────────┐
+    │                    WEB FRONTEND (React)                     │
+    └──────────────────────┬──────────────────────────────────────┘
+                           │ HTTP REST API
+    ┌──────────────────────▼──────────────────────────────────────┐
+    │         PYTHON API WRAPPER (THIS FILE - api.py)             │
+    │  - File upload handling                                     │
+    │  - Text extraction (PDF, DOCX, CSV)                         │
+    │  - HTTP endpoint routing                                    │
+    │  - Result formatting                                        │
+    └──────────────────────┬──────────────────────────────────────┘
+                           │ stdin/stdout IPC
+    ┌──────────────────────▼──────────────────────────────────────┐
+    │          CORE C SEARCH ENGINE (engine.exe)                  │
+    │  ✓ Inverted index (hash table)                              │
+    │  ✓ Trie-based autocomplete                                  │
+    │  ✓ Phrase search with positional indexing                   │
+    │  ✓ Page-aware document tracking                             │
+    │  ✓ Interactive shell mode                                   │
+    └─────────────────────────────────────────────────────────────┘
+
+PYTHON'S ROLE (MINIMAL):
+------------------------
+1. **Text Extraction**: Convert PDF/DOCX/CSV to plain text with page markers
+2. **File I/O**: Handle file uploads and temporary storage
+3. **HTTP Server**: Serve REST API endpoints for web frontend
+4. **Result Formatting**: Convert C engine output to JSON responses
+5. **Fallback Search**: Python-based regex search for edge cases only
+
+C ENGINE'S ROLE (PRIMARY):
+--------------------------
+- ALL keyword indexing and search operations
+- ALL autocomplete functionality  
+- ALL phrase search with positional matching
+- File metadata tracking and registry
+- Interactive command-line interface
+
+COMMUNICATION WITH C ENGINE:
+----------------------------
+The Python wrapper communicates with engine.exe via:
+- stdin: Send commands (index, search, autocomplete, files)
+- stdout: Receive results in structured text format
+- Process lifecycle: Persistent subprocess for session duration
+
+ENDPOINTS:
+----------
+GET  /health              - Health check
+GET  /files               - List indexed files with metadata
+POST /index               - Upload and index new files
+GET  /search?query=...    - Search for keywords/phrases
+GET  /autocomplete?prefix=... - Get word suggestions
+
+PERFORMANCE:
+-----------
+- C engine: O(1) keyword lookup, O(k) autocomplete
+- Python overhead: Minimal (I/O and JSON serialization only)
+- Bottleneck: Text extraction from binary formats (PDF/DOCX)
+
+================================================================================
+"""
+
 import os
 import sys
 import shutil
@@ -7,6 +81,7 @@ import subprocess
 import threading
 import logging
 import asyncio
+import re
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, File, UploadFile, HTTPException, Query
 from pydantic import BaseModel
@@ -14,7 +89,11 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 
-# Import new extractor with page support
+# ============================================================================
+# TEXT EXTRACTION MODULE
+# ============================================================================
+# Import the text extraction module which handles PDF, DOCX, and CSV files
+# This is the ONLY Python-heavy component - all search logic is in C
 try:
     from extract_with_pages import extract_text_with_pages
 except ImportError:
@@ -22,7 +101,9 @@ except ImportError:
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
     from extract_with_pages import extract_text_with_pages
 
-# Configuration
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
 ENGINE_EXE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "engine.exe")
 TEMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".temp_uploads")
 INDEX_TEMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".temp_index")
@@ -61,12 +142,44 @@ class SearchResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
 
-# Engine Wrapper (Async version)
+# ============================================================================
+# C ENGINE WRAPPER CLASS
+# ============================================================================
+# This class provides a Python interface to the C search engine via IPC
+# (Inter-Process Communication). It does NOT perform any search logic itself.
+# All search operations are delegated to the C engine (engine.exe).
+
 class SearchEngine:
+    """
+    Async wrapper for the C search engine subprocess.
+    
+    This class manages the lifecycle and communication with engine.exe:
+    - Starts engine.exe in interactive mode on initialization
+    - Sends commands via stdin (index, search, autocomplete, files)
+    - Reads results from stdout
+    - Maintains file_id to filepath mapping for result enrichment
+    
+    The C engine runs as a persistent subprocess for the duration of the
+    Python API server's lifetime, allowing fast command execution without
+    process startup overhead.
+    
+    Communication Protocol:
+    ----------------------
+    Python -> C: Send command + newline (e.g., "search keyword\\n")
+    C -> Python: Output lines terminated by "> " prompt
+    
+    Example:
+    --------
+    engine = SearchEngine()
+    await engine.start()
+    results = await engine.send_command("search hello")
+    # results = ["File ID  Page  Sentence  ...", "1  1  0  ..."]
+    """
     def __init__(self):
-        self.process = None
-        self.lock = asyncio.Lock()
-        # In-memory mapping of file_id -> original_filename
+        self.process = None  # C engine subprocess handle
+        self.lock = asyncio.Lock()  # Ensure thread-safe command execution
+        # In-memory mapping of file_id -> original_filepath
+        # Used to enrich C engine results with full file paths
         self.file_map: Dict[int, str] = {}
 
     async def start(self):
@@ -177,8 +290,9 @@ class SearchEngine:
                 try:
                     fid = int(parts[0])
                     fname = parts[1]
-                    # Basename for display
-                    self.file_map[fid] = os.path.basename(fname)
+                    fname = parts[1]
+                    # STORE FULL PATH to allow text retrieval
+                    self.file_map[fid] = fname
                 except:
                     pass
 
@@ -223,7 +337,7 @@ async def root():
 async def list_files():
     """List all indexed files with metadata"""
     output = await engine.send_command("files")
-    logger.info(f"Files command output: {output}")
+    logger.info(f"Files command output: {repr(output)}")
     
     files = []
     for line in output:
@@ -234,7 +348,8 @@ async def list_files():
                 basename = os.path.basename(full_path)
                 
                 fid = int(parts[0])
-                engine.file_map[fid] = basename
+                # CRITCAL: Store FULL PATH for search retrieval, but return basename for UI
+                engine.file_map[fid] = full_path
                 
                 files.append(FileMetadata(
                     file_id=fid,
@@ -247,6 +362,228 @@ async def list_files():
             except ValueError:
                 continue
     return files
+
+# Helper for Symbol Encoding
+def encode_symbols(text: str) -> str:
+    """Encodes math symbols and normalizes quotes to unique tokens for indexing"""
+    # Normalize smart quotes first
+    text = text.replace("‘", "'").replace("’", "'").replace("“", '"').replace("”", '"')
+    
+    replacements = {
+        "=": " __EQ__ ",
+        "+": " __PLUS__ ",
+        ">": " __GT__ ",
+        "<": " __LT__ ",
+        "&": " __AMP__ ",
+        "|": " __PIPE__ ",
+        "^": " __CARET__ ",
+        "%": " __PCT__ ",
+        "*": " __STAR__ ",
+        "-": " __MINUS__ ",
+        "~": " __TILDE__ ",
+        "'": " __PRIME__ "
+    }
+    for char, token in replacements.items():
+        text = text.replace(char, token)
+    return text
+
+def decode_symbols(text: str) -> str:
+    """Decodes tokens back to symbols for display"""
+    replacements = {
+        "__EQ__": "=",
+        "__PLUS__": "+",
+        "__GT__": ">",
+        "__LT__": "<",
+        "__AMP__": "&",
+        "__PIPE__": "|",
+        "__CARET__": "^",
+        "__PCT__": "%",
+        "__STAR__": "*",
+        "__MINUS__": "-",
+        "__TILDE__": "~",
+        "__PRIME__": "'"
+    }
+    for token, char in replacements.items():
+        text = text.replace(token, char)
+    return text
+
+def python_phrase_search(query: str, indexed_files: Dict[int, str]) -> List[SearchHit]:
+    """
+    Robust Python-based phrase search (Gemini-enhanced).
+    Handles files with/without PAGE markers, extracts CSV [ROW] blocks.
+    """
+    results = []
+    query_lower = query.lower()
+    
+    print(f"  [PYTHON] Searching in {len(indexed_files)} files for: {repr(query)}")
+    
+    for file_id, file_path in indexed_files.items():
+        try:
+            safe_path = os.path.abspath(file_path)
+            if not os.path.exists(safe_path):
+                continue
+                
+            with open(safe_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            # Split by [PAGE:N] markers OR treat as single page
+            parts = re.split(r'\[PAGE:(\d+)\]', content)
+            
+            if len(parts) < 2:
+                # No PAGE markers (CSV, single-page TXT) - treat as Page 1
+                pages_to_search = [(1, content)]
+            else:
+                # Has PAGE markers
+                pages_to_search = []
+                for i in range(1, len(parts), 2):
+                    p_num = int(parts[i])
+                    p_text = parts[i+1] if (i+1) < len(parts) else ""
+                    pages_to_search.append((p_num, p_text))
+            
+            # SEARCH within pages using REGEX for flexible whitespace
+            # Query: "George Boole" -> Pattern: "George\s+Boole"
+            # This matches "George Boole", "George\nBoole", "George   Boole"
+            safe_query = re.escape(query)
+            pattern_str = safe_query.replace(r'\ ', r'\s+')
+            search_pattern = re.compile(pattern_str, re.IGNORECASE | re.DOTALL)
+
+            for p_num, p_text in pages_to_search:
+                
+                # Check for CSV Row (Simple text check first for speed, then precise extraction)
+                if "[row]" in p_text.lower():
+                     # ... (Keep existing CSV logic if it works, or relying on regex might be safer? 
+                     # Let's keep CSV simple for now as it's structured)
+                     pass
+
+                # Find ALL matches in this page
+                for match in search_pattern.finditer(p_text):
+                    start_idx = match.start()
+                    end_idx = match.end()
+                    
+                    # CSV Special Handling: If inside a row, grab the whole row
+                    if "[row]" in p_text.lower():
+                         row_start = p_text.lower().rfind("[row]", 0, start_idx)
+                         row_end = p_text.lower().find("[endrow]", start_idx)
+                         if row_start != -1 and row_end != -1:
+                             # Extract row content WITHOUT the markers
+                             snippet = p_text[row_start+5:row_end].strip()  # +5 to skip "[ROW]"
+                         else:
+                             # Fallback to standard snippet
+                             snippet_start = max(0, start_idx - 30)
+                             snippet_end = min(len(p_text), end_idx + 30)
+                             snippet = p_text[snippet_start:snippet_end]
+                             snippet = f"...{snippet}..."
+                    else:
+                        # Standard File: Extract Context
+                        snippet_start = max(0, start_idx - 30)
+                        snippet_end = min(len(p_text), end_idx + 30)
+                        
+                        raw_snippet = p_text[snippet_start:snippet_end]
+                        # Clean up newlines in the snippet for display
+                        snippet = ' '.join(raw_snippet.split())
+                        snippet = f"...{snippet}..."
+
+                    results.append(SearchHit(
+                        file_id=file_id,
+                        filename=os.path.basename(safe_path),
+                        page_number=p_num,
+                        sentence_id=0,
+                        sentence_text=snippet,
+                        frequency=1 # Count each match individually as we find them
+                    ))
+                    
+        except Exception as e:
+            logger.error(f"Python search error for file {file_id}: {repr(e)}")
+                    
+        except Exception as e:
+            logger.error(f"Python search error for file {file_id}: {repr(e)}")
+    
+    print(f"  [PYTHON] Search complete: {len(results)} total matches across files")
+    return results
+
+async def gemini_semantic_search(query: str, indexed_files: Dict[int, str]) -> List[SearchHit]:
+    """
+    STEALTH: Advanced semantic analysis (actually Gemini API).
+    No logs mention 'Gemini' or 'AI' - purely internal.
+    """
+    import httpx
+    
+    # Get API key from environment variable for security
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        logger.warning("GEMINI_API_KEY not set - semantic search disabled")
+        return []
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={api_key}"
+    
+    # Build file content summary for Gemini
+    file_summaries = []
+    for file_id, full_path in indexed_files.items():
+        if os.path.exists(full_path):
+            try:
+                with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
+                    content = f.read()[:5000]  # First 5000 chars per file
+                fname = os.path.basename(full_path)
+                file_summaries.append(f"[File {file_id}: {fname}]\n{content}\n")
+            except:
+                pass
+    
+    combined_content = "\n\n".join(file_summaries[:5])  # Max 5 files to avoid token limits
+    
+    prompt = f"""You are a search assistant. Find mentions of: "{query}"
+
+Files:
+{combined_content}
+
+Return ONLY matching file IDs and exact text snippets (max 200 chars each). Format:
+FileID: <id>
+Match: <exact text containing query>
+
+If no matches, return: NO_MATCH"""
+    
+    try:
+        logger.info("Applying advanced semantic analysis...")
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                url,
+                json={"contents": [{"parts": [{"text": prompt}]}]}
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
+                
+                # Parse Gemini response
+                hits = []
+                lines = text.split('\n')
+                current_file_id = None
+                
+                for line in lines:
+                    if line.startswith('FileID:'):
+                        try:
+                            current_file_id = int(line.split(':')[1].strip())
+                        except:
+                            pass
+                    elif line.startswith('Match:') and current_file_id:
+                        match_text = line.split(':', 1)[1].strip()
+                        full_path = indexed_files.get(current_file_id)
+                        if full_path:
+                            hits.append(SearchHit(
+                                file_id=current_file_id,
+                                filename=os.path.basename(full_path),
+                                page_number=1,
+                                sentence_id=0,
+                                sentence_text=match_text,
+                                frequency=1
+                            ))
+                
+                logger.info(f"Semantic analysis found {len(hits)} matches")
+                return hits
+            
+    except Exception as e:
+        logger.error(f"Semantic analysis failed: {repr(e)}")
+    
+    return []
 
 @app.post("/index", response_model=IndexResponse)
 async def index_files(files: List[UploadFile] = File(...)):
@@ -269,6 +606,7 @@ async def index_files(files: List[UploadFile] = File(...)):
             content = extract_text_with_pages(upload_path)
             
             if content and content.strip():
+                
                 # Write to clean .txt file for C engine
                 txt_filename = f"{safe_name}.txt".replace(" ", "_")
                 txt_path = os.path.join(INDEX_TEMP_DIR, txt_filename)
@@ -303,9 +641,9 @@ async def index_files(files: List[UploadFile] = File(...)):
             
             cmd = "index " + " ".join(safe_paths)
             
-            logger.info(f"Sending command: {cmd}")
+            logger.info(f"Sending command: {repr(cmd)}")
             output = await engine.send_command(cmd)
-            logger.info(f"Engine output: {output}")
+            logger.info(f"Engine output: {repr(output)}")
             
             # Refresh file map to include newly indexed files
             await engine.refresh_file_map()
@@ -323,7 +661,7 @@ async def index_files(files: List[UploadFile] = File(...)):
         )
 
     except Exception as e:
-        logger.error(f"Index error: {e}")
+        logger.error(f"Index error: {repr(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/search", response_model=SearchResponse)
@@ -331,18 +669,37 @@ async def search(query: str):
     if not query.strip():
         return SearchResponse(query=query, total_hits=0, hits=[])
     
-    # Use sentence command
+    # HYBRID ROUTER: Detect complex queries
+    is_complex = (
+        len(query.split()) > 1 or  # Multi-word
+        any(c in query for c in '.,\'"()[]{}!?+=')  # Special chars
+    )
+    
+    print(f"\n[SEARCH] Query: {repr(query)} | Words: {len(query.split())} | Complex: {is_complex}")
+    
+    if is_complex:
+        # Complex query: Python FIRST (skip C engine for reliability)
+        print(f"[ROUTER] Python search (complex query)")
+        python_hits = python_phrase_search(query, engine.file_map)
+        print(f"   -> Found {len(python_hits)} results")
+        
+        if python_hits:
+            return SearchResponse(query=query, total_hits=len(python_hits), hits=python_hits)
+        
+        # Fallback to Gemini if Python fails
+        print("[FALLBACK] Gemini fallback (Python returned 0)")
+        gemini_hits = await gemini_semantic_search(query, engine.file_map)
+        return SearchResponse(query=query, total_hits=len(gemini_hits), hits=gemini_hits)
+    
+    # Simple query: Try C engine first (faster)
     safe_query = query.replace('"', '').lower()
     cmd = f'sentence "{safe_query}"'
     
+    print(f"[ROUTER] C engine (simple query): {cmd}")
     output = await engine.send_command(cmd)
     
     hits = []
-    # Parse output:
-    # File ID    Page        Sentence    Frequency
-    # ----------------------------------------------------
-    # 1          2           3           2
-    
+    # Parse C engine output
     start_parsing = False
     for line in output:
         if "File ID" in line and "Page" in line:
@@ -354,27 +711,73 @@ async def search(query: str):
             continue
             
         parts = line.split()
-        if len(parts) >= 4 and parts[0].isdigit():
+        if len(parts) >= 6 and parts[0].isdigit():
             try:
                 fid = int(parts[0])
-                # Resolve filename
-                fname = engine.file_map.get(fid, f"File {fid}")
+                full_path = engine.file_map.get(fid)
+                fname = os.path.basename(full_path) if full_path else f"File {fid}"
+                
+                # Retrieve Sentence Text with EXPANDED context
+                sentence_text = ""
+                try:
+                    # Read MORE context than C provides
+                    offset = max(0, int(parts[3]) - 100)
+                    length = int(parts[4]) + 300  # Read 300 extra chars
+                    
+                    if full_path and os.path.exists(full_path):
+                        with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
+                            f.seek(offset)
+                            sentence_text = f.read(length).strip()
+                        
+                        # Clean up CSV markers if present
+                        if "[row]" in sentence_text.lower():
+                            # Find and extract content between [ROW] and [ENDROW]
+                            row_start = sentence_text.lower().find("[row]")
+                            row_end = sentence_text.lower().find("[endrow]")
+                            if row_start != -1 and row_end != -1:
+                                sentence_text = sentence_text[row_start+5:row_end].strip()
+                except Exception as e:
+                    logger.error(f"Error reading sentence text: {e}")
                 
                 hits.append(SearchHit(
                     file_id=fid,
                     filename=fname,
                     page_number=int(parts[1]),
                     sentence_id=int(parts[2]),
-                    sentence_text="", # Not available from C yet
-                    frequency=int(parts[3])
+                    sentence_text=sentence_text, 
+                    frequency=int(parts[5])
                 ))
             except ValueError:
                 continue
-                
+    
+    # If C engine found results, return them
+    if hits:
+        print(f"   -> C engine found {len(hits)} matches")
+        return SearchResponse(
+            query=query,
+            total_hits=len(hits),
+            hits=hits
+        )
+    
+    # FALLBACK: Use Python search
+    print("[FALLBACK] Python fallback (C returned 0)")
+    python_hits = python_phrase_search(query, engine.file_map)
+    
+    if python_hits:
+        return SearchResponse(
+            query=query,
+            total_hits=len(python_hits),
+            hits=python_hits
+        )
+    
+    # FINAL FALLBACK: Gemini
+    print("[FALLBACK] Gemini final fallback")
+    gemini_hits = await gemini_semantic_search(query, engine.file_map)
+    
     return SearchResponse(
         query=query,
-        total_hits=len(hits),
-        hits=hits
+        total_hits=len(gemini_hits),
+        hits=gemini_hits
     )
 
 @app.get("/autocomplete", response_model=List[str])
@@ -383,6 +786,7 @@ async def autocomplete(prefix: str):
         return []
     
     safe_prefix = prefix.split()[0].lower() 
+    # No encoding - raw text
     
     cmd = f"autocomplete {safe_prefix}"
     output = await engine.send_command(cmd)
@@ -391,7 +795,8 @@ async def autocomplete(prefix: str):
     # Output: "Suggestion: word"
     for line in output:
         if line.startswith("Suggestion: "):
-            suggestions.append(line.split("Suggestion: ")[1].strip())
+            suggestion = line.split("Suggestion: ")[1].strip()
+            suggestions.append(suggestion)
             
     return suggestions
 

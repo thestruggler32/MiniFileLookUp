@@ -1,3 +1,54 @@
+/*
+ * ============================================================================
+ * MINI SEARCH ENGINE - CORE C ENGINE
+ * ============================================================================
+ * 
+ * FILE: main.c
+ * DESCRIPTION: Main driver for the high-performance C-based search engine
+ * 
+ * ARCHITECTURE OVERVIEW:
+ * ---------------------
+ * This is the CORE search engine implementation written in C for maximum
+ * performance. The engine provides:
+ * 
+ * 1. INVERTED INDEX: Fast keyword-to-document mapping using hash tables
+ * 2. TRIE-BASED AUTOCOMPLETE: Prefix-based word suggestions
+ * 3. PHRASE SEARCH: Multi-word query support with positional indexing
+ * 4. PAGE-AWARE INDEXING: Tracks page numbers for PDF/DOCX files
+ * 5. INTERACTIVE SHELL: Command-line interface for direct C engine access
+ * 
+ * PERFORMANCE CHARACTERISTICS:
+ * ---------------------------
+ * - O(1) average case keyword lookup via hash table
+ * - O(k) autocomplete where k = number of matching words
+ * - O(n*m) phrase search where n = doc count, m = query length
+ * - Memory-efficient: Processes files up to 1MB in single pass
+ * 
+ * INTEGRATION:
+ * -----------
+ * The Python API (api.py) acts as a THIN WRAPPER around this C engine,
+ * providing:
+ * - HTTP REST interface for web frontend
+ * - File upload handling and text extraction
+ * - Fallback search logic for complex queries
+ * 
+ * The C engine handles ALL core search operations. Python is only used
+ * for I/O, text extraction, and serving the web interface.
+ * 
+ * COMPILATION:
+ * -----------
+ * gcc -o engine.exe src/main.c src/index.c src/trie.c -I./include
+ * 
+ * USAGE:
+ * ------
+ * ./engine.exe interactive          # Start interactive shell
+ * ./engine.exe index file1.txt      # Index files
+ * ./engine.exe search "keyword"     # Search for keyword
+ * ./engine.exe autocomplete "pre"   # Get autocomplete suggestions
+ * 
+ * ============================================================================
+ */
+
 #include "../include/index.h"
 #include "../include/trie.h"
 #include <errno.h>
@@ -5,7 +56,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_BUFFER_SIZE 1024 * 1024 // 1MB buffer cap
+#define MAX_BUFFER_SIZE 1024 * 1024 // 1MB buffer cap for file processing
 
 // -----------------------------------------------------------------------------
 // Helper: File Reading & Processing
@@ -53,28 +104,37 @@ void process_text_buffer(InvertedIndex *idx, TrieNode *trie, int file_id,
       }
     }
 
-    if (*cursor == '.' || *cursor == '?' || *cursor == '!') {
-      // Found a sentence end
+    // FIX: Switch to LINE/PARAGRAPH based splitting instead of STRICT SENTENCE
+    // splitting. This allows "main_memory.v" and multi-sentence queries to
+    // work. We treat '\n' as the only hard breaker. Punctuation is just a word
+    // delimiter.
+    if (*cursor == '\n') {
+      // Found a line/paragraph end
       char delimiter = *cursor;
       *cursor = '\0';
 
-      // Process terms in this sentence
+      // Process terms in this paragraph
       char *sentence_copy = strdup(sentence_start);
       if (sentence_copy) {
+        // Calculate offset and length
+        long offset = sentence_start - text;
+        int len = cursor - sentence_start;
+
         int position = 0;
-        char *word = strtok(sentence_copy, " \t\n\r,;:\"()[]{}");
+        char *word = strtok(sentence_copy, " \t\n\r,;:\"()[]{}!?.+=<>|&^%*-~'");
         // Note: brackets [] added to delimiters to clean up any marker residue
         // if parsing failed
         while (word) {
           // Skip if it looks like part of a marker (unlikely due to above
           // logic, but safety)
           if (strncmp(word, "PAGE:", 5) != 0) {
-            index_word(idx, word, file_id, sentence_id, current_page, position);
+            index_word(idx, word, file_id, sentence_id, current_page, offset,
+                       len, position);
             insert_word(trie, word);
             position++;
             word_count++;
           }
-          word = strtok(NULL, " \t\n\r,;:\"()[]{}");
+          word = strtok(NULL, " \t\n\r,;:\"()[]{}!?.+=<>|&^%*-~'");
         }
         free(sentence_copy);
       }
@@ -91,10 +151,14 @@ void process_text_buffer(InvertedIndex *idx, TrieNode *trie, int file_id,
     char *sentence_copy = strdup(sentence_start);
     if (sentence_copy) {
       int position = 0;
-      char *word = strtok(sentence_copy, " \t\n\r,;:\"()[]{}");
+      char *word = strtok(sentence_copy, " \t\n\r,;:\"()[]{}!?.+=<>|&^%*-~'");
       while (word) {
         if (strncmp(word, "PAGE:", 5) != 0) {
-          index_word(idx, word, file_id, sentence_id, current_page, position);
+          // For last sentence
+          long offset = sentence_start - text;
+          int len = cursor - sentence_start;
+          index_word(idx, word, file_id, sentence_id, current_page, offset, len,
+                     position);
           insert_word(trie, word);
           position++;
           word_count++;
@@ -178,12 +242,14 @@ void print_search_results(Occurrence *occ) {
     printf("No results found.\n");
     return;
   }
-  printf("%-10s %-12s %-10s %-10s\n", "File ID", "Page", "Sentence",
-         "Frequency");
-  printf("----------------------------------------------------\n");
+  printf("%-10s %-12s %-10s %-12s %-10s %-10s\n", "File ID", "Page", "Sentence",
+         "Offset", "Length", "Frequency");
+  printf("---------------------------------------------------------------------"
+         "-----------\n");
   while (occ) {
-    printf("%-10d %-12d %-10d %-10d\n", occ->file_id, occ->page_number,
-           occ->sentence_id, occ->frequency);
+    printf("%-10d %-12d %-10d %-12ld %-10d %-10d\n", occ->file_id,
+           occ->page_number, occ->sentence_id, occ->sentence_offset,
+           occ->sentence_len, occ->frequency);
     occ = occ->next;
   }
 }

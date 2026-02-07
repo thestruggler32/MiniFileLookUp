@@ -5,10 +5,12 @@
 typedef struct Occurrence {
   int file_id;
   int sentence_id;
-  int page_number; // NEW: Page number for this occurrence
-  int frequency;   // Count of this word in this specific sentence
-  int *positions;  // Array of positions (0-indexed)
-  int capacity;    // Capacity of positions array
+  int page_number;
+  long sentence_offset; // NEW: Byte offset of the sentence start
+  int sentence_len;     // NEW: Length of the sentence in bytes
+  int frequency;
+  int *positions; // Array of positions (0-indexed)
+  int capacity;   // Capacity of positions array
   struct Occurrence *next;
 } Occurrence;
 
@@ -60,7 +62,8 @@ InvertedIndex *create_index(int size);
  * or adds a new occurrence node if it's a new sentence/file.
  */
 void index_word(InvertedIndex *idx, const char *word, int file_id,
-                int sentence_id, int page_number, int position);
+                int sentence_id, int page_number, long sentence_offset,
+                int sentence_len, int position);
 
 /**
  * Searches for a whole sentence/phrase.
