@@ -1,17 +1,18 @@
 "use client"
 
 import * as React from "react"
-import { Upload, FileText, Database, CheckCircle2, AlertCircle } from "lucide-react"
+import { Upload, Database, CheckCircle2, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { indexFiles, checkHealth } from "@/lib/api"
+import { useFiles } from "@/app/FileContext"
 import { cn } from "@/lib/utils"
 
 export function FileManagement() {
-    const [isIndexing, setIsIndexing] = React.useState(false)
-    const [indexedCount, setIndexedCount] = React.useState<number | null>(null)
+    const { setFiles, isLoading, setIsLoading } = useFiles();
     const [status, setStatus] = React.useState<"idle" | "success" | "error">("idle")
     const [isBackendHealthy, setIsBackendHealthy] = React.useState(true)
+    const [lastIndexedCount, setLastIndexedCount] = React.useState(0)
     const fileInputRef = React.useRef<HTMLInputElement>(null)
 
     React.useEffect(() => {
@@ -20,18 +21,26 @@ export function FileManagement() {
 
     const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files.length > 0) {
-            setIsIndexing(true)
+            setIsLoading(true)
             setStatus("idle")
             try {
-                const res = await indexFiles(Array.from(e.target.files))
-                setIndexedCount(res.indexed_files)
+                const response = await indexFiles(Array.from(e.target.files))
+
+                // Update global state with the returned list
+                setFiles(response.indexed_files)
+
+                // Track how many were just added for the success message
+                setLastIndexedCount(response.indexed_files.length)
+
                 setStatus("success")
+
+                // Clear success message after 3s
+                setTimeout(() => setStatus("idle"), 3000)
             } catch (error) {
                 console.error("Indexing failed", error)
                 setStatus("error")
             } finally {
-                setIsIndexing(false)
-                // Reset file input
+                setIsLoading(false)
                 if (fileInputRef.current) fileInputRef.current.value = ""
             }
         }
@@ -52,22 +61,24 @@ export function FileManagement() {
                 <CardContent className="flex items-center justify-between p-4">
                     <div className="flex items-center space-x-4">
                         <div className={cn("p-2 rounded-full transition-all",
-                            isIndexing ? "bg-primary/10 animate-pulse" :
+                            isLoading ? "bg-primary/10 animate-pulse" :
                                 status === "success" ? "bg-green-500/10" :
                                     status === "error" ? "bg-destructive/10" : "bg-primary/10"
                         )}>
-                            {isIndexing ? <Database className="h-5 w-5 text-primary animate-spin" /> :
+                            {isLoading ? <Database className="h-5 w-5 text-primary animate-spin" /> :
                                 status === "success" ? <CheckCircle2 className="h-5 w-5 text-green-500" /> :
                                     status === "error" ? <AlertCircle className="h-5 w-5 text-destructive" /> :
                                         <Database className="h-5 w-5 text-primary" />}
                         </div>
                         <div>
                             <p className="font-medium">
-                                {status === "success" ? `Successfully indexed ${indexedCount} files` :
-                                    status === "error" ? "Indexing failed" : "Local Index"}
+                                {status === "success" ? "Indexing Complete" :
+                                    status === "error" ? "Indexing Failed" : "Local Index"}
                             </p>
                             <p className="text-xs text-muted-foreground">
-                                {isIndexing ? "Processing files..." : "Supports .txt, .pdf, .docx, .csv"}
+                                {isLoading ? "Processing documents..." :
+                                    status === "success" ? "Files added to index" :
+                                        "Supports .txt, .pdf, .docx, .csv"}
                             </p>
                         </div>
                     </div>
@@ -84,12 +95,12 @@ export function FileManagement() {
                         <Button
                             size="sm"
                             variant="outline"
-                            disabled={isIndexing || !isBackendHealthy}
+                            disabled={isLoading || !isBackendHealthy}
                             onClick={() => fileInputRef.current?.click()}
                             className="gap-2"
                         >
                             <Upload className="h-3.5 w-3.5" />
-                            {isIndexing ? "Indexing..." : "Upload Files"}
+                            {isLoading ? "Indexing..." : "Upload Files"}
                         </Button>
                     </div>
                 </CardContent>

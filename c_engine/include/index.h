@@ -5,9 +5,10 @@
 typedef struct Occurrence {
   int file_id;
   int sentence_id;
-  int frequency;  // Count of this word in this specific sentence
-  int *positions; // Array of positions (0-indexed)
-  int capacity;   // Capacity of positions array
+  int page_number; // NEW: Page number for this occurrence
+  int frequency;   // Count of this word in this specific sentence
+  int *positions;  // Array of positions (0-indexed)
+  int capacity;    // Capacity of positions array
   struct Occurrence *next;
 } Occurrence;
 
@@ -24,6 +25,29 @@ typedef struct InvertedIndex {
   int size;             // Number of buckets
 } InvertedIndex;
 
+// File Metadata Tracking
+#define MAX_FILENAME_LEN 256
+#define MAX_FILES 100
+
+typedef struct FileMetadata {
+  int file_id;
+  char filename[MAX_FILENAME_LEN];
+  long size_bytes;
+  int word_count;
+  int sentence_count;
+  int page_count;
+} FileMetadata;
+
+typedef struct FileRegistry {
+  FileMetadata files[MAX_FILES];
+  int count;
+} FileRegistry;
+
+FileRegistry *create_file_registry();
+void register_file(FileRegistry *reg, int file_id, const char *filepath,
+                   long size, int words, int sentences, int pages);
+void print_file_registry(FileRegistry *reg);
+
 /**
  * Creates a new Inverted Index with a specified number of buckets.
  */
@@ -36,7 +60,7 @@ InvertedIndex *create_index(int size);
  * or adds a new occurrence node if it's a new sentence/file.
  */
 void index_word(InvertedIndex *idx, const char *word, int file_id,
-                int sentence_id, int position);
+                int sentence_id, int page_number, int position);
 
 /**
  * Searches for a whole sentence/phrase.

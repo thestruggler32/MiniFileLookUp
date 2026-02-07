@@ -6,19 +6,21 @@ import glob
 import subprocess
 import threading
 import logging
+import asyncio
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, File, UploadFile, HTTPException, Query
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import uvicorn
+from fastapi.middleware.cors import CORSMiddleware
 
-# Import existing extractor
+# Import new extractor with page support
 try:
-    from extractor import extract_text
+    from extract_with_pages import extract_text_with_pages
 except ImportError:
     # Fallback if running from a different directory
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-    from extractor import extract_text
+    from extract_with_pages import extract_text_with_pages
 
 # Configuration
 ENGINE_EXE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "engine.exe")
@@ -29,100 +31,156 @@ INDEX_TEMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".temp
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("api")
 
-# Models
-class SearchResult(BaseModel):
+# --- STRICT TYPE DEFINITIONS ---
+class FileMetadata(BaseModel):
     file_id: int
-    sentence_id: int
-    frequency: int
+    filename: str
+    size_bytes: int
+    word_count: int
+    sentence_count: int
+    page_count: int
 
 class IndexResponse(BaseModel):
-    indexed_files: int
+    success: bool
+    indexed_files: List[FileMetadata]
+    total_files: int
+
+class SearchHit(BaseModel):
+    file_id: int
+    filename: str
+    page_number: int
+    sentence_id: int
+    sentence_text: str = ""
+    frequency: int
+
+class SearchResponse(BaseModel):
+    query: str
+    total_hits: int
+    hits: List[SearchHit]
 
 class HealthResponse(BaseModel):
     status: str
 
-# Engine Wrapper
+# Engine Wrapper (Async version)
 class SearchEngine:
     def __init__(self):
         self.process = None
-        self.lock = threading.Lock()
+        self.lock = asyncio.Lock()
+        # In-memory mapping of file_id -> original_filename
+        self.file_map: Dict[int, str] = {}
 
-    def start(self):
+    async def start(self):
         if not os.path.exists(ENGINE_EXE):
             raise RuntimeError(f"Engine executable not found at {ENGINE_EXE}")
 
-        logger.info(f"Starting C engine: {ENGINE_EXE}")
+        logger.info(f"Starting C engine (Async): {ENGINE_EXE}")
         try:
-            self.process = subprocess.Popen(
-                [ENGINE_EXE, "interactive"],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Merge stderr to handle errors in same stream
-                bufsize=0,  # Unbuffered
+            cwd = os.path.dirname(os.path.abspath(__file__))
+            self.process = await asyncio.create_subprocess_exec(
+                ENGINE_EXE, "interactive",
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd
             )
-            self._read_until_prompt()  # Consume initial banner
-            logger.info("C Engine started and ready.")
+            
+            # Start a background task to log stderr
+            asyncio.create_task(self._log_stderr())
+            
+            await self._read_until_prompt()  # Consume initial banner
+            logger.info(f"C Engine started and ready. CWD: {cwd}")
         except Exception as e:
             logger.error(f"Failed to start engine: {e}")
             raise
 
-    def stop(self):
+    async def _log_stderr(self):
+        """Read stderr and log it to python logger"""
+        try:
+            while self.process and not self.process.stderr.at_eof():
+                line = await self.process.stderr.readline()
+                if line:
+                    logger.error(f"C Engine STDERR: {line.decode('utf-8', errors='replace').strip()}")
+        except Exception as e:
+            logger.debug(f"Stderr logging stopped: {e}")
+
+    async def stop(self):
         if self.process:
             logger.info("Stopping C engine...")
             try:
                 self.process.terminate()
-                self.process.wait(timeout=2)
+                await self.process.wait()
             except Exception:
                 self.process.kill()
             self.process = None
 
-    def _read_until_prompt(self) -> List[str]:
+    async def _read_until_prompt(self, timeout: float = 5.0) -> List[str]:
         """
-        Reads from stdout byte-by-byte until the prompt '> ' is encountered.
+        Reads from stdout until the prompt '> ' is encountered.
         Returns a list of clean lines (strings) collected before the prompt.
         """
         output_lines = []
-        current_line = bytearray()
+        buffer = bytearray()
         
-        while True:
-            char = self.process.stdout.read(1)
-            if not char:
-                # EOF/Process died
-                break
-            
-            # Check for prompt "> " (last 2 chars)
-            # We append first to check the sequence
-            current_line.extend(char)
-            
-            # Optimization: Check directly if we have a newline
-            if char == b'\n':
-                line_str = current_line.decode('utf-8', errors='replace').strip()
-                if line_str:
-                    output_lines.append(line_str)
-                current_line = bytearray()
-            elif current_line.endswith(b'> '):
-                # Prompt detected.
-                # The prompt itself is NOT part of the output lines we want to return.
-                # However, there might be text before the prompt on the same line (rare but possible).
-                remainder = current_line[:-2].decode('utf-8', errors='replace').strip()
-                if remainder:
-                    output_lines.append(remainder)
-                break
+        try:
+            while True:
+                # Read 1 byte at a time to catch the prompt promptly
+                # We use a timeout to prevent infinite hangs
+                char = await asyncio.wait_for(self.process.stdout.read(1), timeout=timeout)
+                if not char:
+                    # EOF
+                    break
+                
+                buffer.extend(char)
+                
+                # Check for prompt "> "
+                if buffer.endswith(b'> '):
+                    remainder = buffer[:-2].decode('utf-8', errors='replace').strip()
+                    if remainder:
+                        output_lines.append(remainder)
+                    break
+                    
+                if char == b'\n':
+                    line_str = buffer.decode('utf-8', errors='replace').strip()
+                    if line_str:
+                        output_lines.append(line_str)
+                    buffer = bytearray()
+                    
+        except asyncio.TimeoutError:
+            logger.error("Timeout waiting for C engine prompt")
+            # Return what we have so far
+            if buffer:
+                output_lines.append(buffer.decode('utf-8', errors='replace').strip())
                 
         return output_lines
 
-    def send_command(self, cmd: str) -> List[str]:
-        with self.lock:
+    async def send_command(self, cmd: str) -> List[str]:
+        async with self.lock:
             if not self.process:
                 raise RuntimeError("Engine is not running")
             
             # Write command
-            logger.info(f"Sending command: {cmd}")
+            logger.info(f"Sending command to C engine: {cmd}")
             self.process.stdin.write((cmd + "\n").encode('utf-8'))
-            self.process.stdin.flush()
+            await self.process.stdin.drain()
             
             # Read response
-            return self._read_until_prompt()
+            return await self._read_until_prompt()
+            
+    async def refresh_file_map(self):
+        """Fetch latest file list from C engine to update local map"""
+        lines = await self.send_command("files")
+        # Parse lines like: 
+        # 1        | filename.txt                   | 10         | 100      | 5          | 1
+        for line in lines:
+            parts = [p.strip() for p in line.split('|')]
+            if len(parts) >= 2 and parts[0].isdigit():
+                try:
+                    fid = int(parts[0])
+                    fname = parts[1]
+                    # Basename for display
+                    self.file_map[fid] = os.path.basename(fname)
+                except:
+                    pass
 
 # Global Engine Instance
 engine = SearchEngine()
@@ -133,16 +191,16 @@ async def lifespan(app: FastAPI):
     # Startup
     os.makedirs(TEMP_DIR, exist_ok=True)
     os.makedirs(INDEX_TEMP_DIR, exist_ok=True)
-    engine.start()
+    await engine.start()
     yield
     # Shutdown
-    engine.stop()
-    shutil.rmtree(TEMP_DIR, ignore_errors=True)
-    shutil.rmtree(INDEX_TEMP_DIR, ignore_errors=True)
+    await engine.stop()
+    # Optional: Keep temp dirs for debugging if they aren't too large
+    # shutil.rmtree(TEMP_DIR, ignore_errors=True)
+    # shutil.rmtree(INDEX_TEMP_DIR, ignore_errors=True)
 
 app = FastAPI(lifespan=lifespan)
 
-from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -153,7 +211,7 @@ app.add_middleware(
 
 @app.get("/health", response_model=HealthResponse)
 async def health():
-    if engine.process and engine.process.poll() is None:
+    if engine.process and engine.process.returncode is None:
         return {"status": "ok"}
     raise HTTPException(status_code=503, detail="Engine not running")
 
@@ -161,10 +219,41 @@ async def health():
 async def root():
     return {"message": "Mini Search Engine API is running. Visit /docs for API documentation."}
 
+@app.get("/files", response_model=List[FileMetadata])
+async def list_files():
+    """List all indexed files with metadata"""
+    output = await engine.send_command("files")
+    logger.info(f"Files command output: {output}")
+    
+    files = []
+    for line in output:
+        parts = [p.strip() for p in line.split('|')]
+        if len(parts) >= 6 and parts[0].isdigit():
+            try:
+                full_path = parts[1]
+                basename = os.path.basename(full_path)
+                
+                fid = int(parts[0])
+                engine.file_map[fid] = basename
+                
+                files.append(FileMetadata(
+                    file_id=fid,
+                    filename=basename,
+                    size_bytes=int(parts[2]) * 1024,
+                    word_count=int(parts[3]),
+                    sentence_count=int(parts[4]),
+                    page_count=int(parts[5])
+                ))
+            except ValueError:
+                continue
+    return files
+
 @app.post("/index", response_model=IndexResponse)
 async def index_files(files: List[UploadFile] = File(...)):
     indexed_count = 0
     temp_txt_paths = []
+    
+    logger.info(f"Received {len(files)} files for indexing")
 
     try:
         # 1. Process and Extract
@@ -176,18 +265,15 @@ async def index_files(files: List[UploadFile] = File(...)):
             with open(upload_path, "wb") as f:
                 shutil.copyfileobj(file.file, f)
             
-            # Extract text
-            content = extract_text(upload_path)
+            # Extract text WITH PAGES
+            content = extract_text_with_pages(upload_path)
             
             if content and content.strip():
                 # Write to clean .txt file for C engine
-                # Encode spaces in filename to avoiding command parsing issues in C (strtok)
-                # The C engine uses space as delimiter.
-                # We'll use underscores for the filename passed to C.
                 txt_filename = f"{safe_name}.txt".replace(" ", "_")
                 txt_path = os.path.join(INDEX_TEMP_DIR, txt_filename)
                 
-                # Ensure unique path if multiple users (though redundant with time prefix above)
+                # Ensure unique path
                 if os.path.exists(txt_path):
                      txt_path = os.path.join(INDEX_TEMP_DIR, f"{int(time.time())}_{txt_filename}")
 
@@ -208,50 +294,58 @@ async def index_files(files: List[UploadFile] = File(...)):
 
         # 2. Send to C Engine
         if temp_txt_paths:
-            # Command: index file1 file2 ...
-            # IMPORTANT: The C engine uses strtok with space delimiter, so paths with spaces break!
-            # Use RELATIVE paths from the engine's working directory (c_engine folder).
-            # The .temp_index folder is relative to the engine, so we use ".temp_index/filename"
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            cmd_paths = []
+            # CRITICAL FIX: Use absolute paths with forward slashes (verified in debug_glue.py)
+            safe_paths = []
             for p in temp_txt_paths:
-                # Convert to relative path from base_dir
-                rel_path = os.path.relpath(p, base_dir).replace(os.sep, "/")
-                cmd_paths.append(rel_path)
-            cmd = "index " + " ".join(cmd_paths)
+                abs_path = os.path.abspath(p)
+                safe_path = abs_path.replace(os.sep, '/')  # Forward slashes for C engine
+                safe_paths.append(safe_path)
             
-            output = engine.send_command(cmd)
+            cmd = "index " + " ".join(safe_paths)
+            
+            logger.info(f"Sending command: {cmd}")
+            output = await engine.send_command(cmd)
+            logger.info(f"Engine output: {output}")
+            
+            # Refresh file map to include newly indexed files
+            await engine.refresh_file_map()
             
             # Count the files that were successfully prepared and sent
             indexed_count = len(temp_txt_paths)
         
-        return {"indexed_files": indexed_count}
+        # 3. Return updated file list (Source of Truth)
+        current_files = await list_files()
+        
+        return IndexResponse(
+            success=True,
+            indexed_files=current_files,
+            total_files=len(current_files)
+        )
 
     except Exception as e:
         logger.error(f"Index error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/search", response_model=List[SearchResult])
+@app.get("/search", response_model=SearchResponse)
 async def search(query: str):
     if not query.strip():
-        return []
+        return SearchResponse(query=query, total_hits=0, hits=[])
     
     # Use sentence command
-    # Sanitize query: remove quotes to avoid breaking the protocol
-    safe_query = query.replace('"', '')
+    safe_query = query.replace('"', '').lower()
     cmd = f'sentence "{safe_query}"'
     
-    output = engine.send_command(cmd)
+    output = await engine.send_command(cmd)
     
-    results = []
+    hits = []
     # Parse output:
-    # File ID    Sentence ID  Frequency
-    # ----------------------------------------
-    # 1          3            2
+    # File ID    Page        Sentence    Frequency
+    # ----------------------------------------------------
+    # 1          2           3           2
     
     start_parsing = False
     for line in output:
-        if "File ID" in line and "Sentence ID" in line:
+        if "File ID" in line and "Page" in line:
             start_parsing = True
             continue
         if "----" in line:
@@ -260,29 +354,38 @@ async def search(query: str):
             continue
             
         parts = line.split()
-        if len(parts) >= 3 and parts[0].isdigit():
+        if len(parts) >= 4 and parts[0].isdigit():
             try:
-                results.append(SearchResult(
-                    file_id=int(parts[0]),
-                    sentence_id=int(parts[1]),
-                    frequency=int(parts[2])
+                fid = int(parts[0])
+                # Resolve filename
+                fname = engine.file_map.get(fid, f"File {fid}")
+                
+                hits.append(SearchHit(
+                    file_id=fid,
+                    filename=fname,
+                    page_number=int(parts[1]),
+                    sentence_id=int(parts[2]),
+                    sentence_text="", # Not available from C yet
+                    frequency=int(parts[3])
                 ))
             except ValueError:
                 continue
                 
-    return results
+    return SearchResponse(
+        query=query,
+        total_hits=len(hits),
+        hits=hits
+    )
 
 @app.get("/autocomplete", response_model=List[str])
 async def autocomplete(prefix: str):
     if not prefix.strip():
         return []
     
-    # Sanitize prefix (simple single word expected usually, but space-safe)
-    safe_prefix = prefix.split()[0] # Autocomplete usually works on the last word, but here implementation takes a prefix.
-    # main.c calls autocomplete(trie, arg) where arg is strtok'd. So it only takes one word.
+    safe_prefix = prefix.split()[0].lower() 
     
     cmd = f"autocomplete {safe_prefix}"
-    output = engine.send_command(cmd)
+    output = await engine.send_command(cmd)
     
     suggestions = []
     # Output: "Suggestion: word"

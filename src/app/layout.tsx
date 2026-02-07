@@ -17,6 +17,8 @@ export const metadata: Metadata = {
   description: "A fast, privacy-focused local search engine.",
 };
 
+import { FileProvider } from "./FileContext";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -27,7 +29,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-background text-foreground bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/5 via-background to-background`}
       >
-        {children}
+        <FileProvider>
+          {children}
+        </FileProvider>
       </body>
     </html>
   );
