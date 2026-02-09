@@ -86,4 +86,15 @@ Occurrence *search_keyword(InvertedIndex *idx, const char *keyword);
  */
 void free_index(InvertedIndex *idx);
 
+/**
+ * Saves the index to a binary file.
+ */
+void save_index(InvertedIndex *idx, const char *filename);
+
+/**
+ * Loads the index from a binary file.
+ * Returns NULL if file doesn't exist or is invalid.
+ */
+InvertedIndex *load_index(const char *filename);
+
 #endif

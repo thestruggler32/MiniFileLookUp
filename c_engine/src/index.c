@@ -182,14 +182,73 @@ void index_word(InvertedIndex *idx, const char *word, int file_id,
   entry->occurrences = new_occ;
 }
 
+// ============================================================================
+// RANKING LOGIC (MERGE SORT LINKED LIST)
+// ============================================================================
+
+// Helper to split list for merge sort
+void split_list(Occurrence *source, Occurrence **front, Occurrence **back) {
+  Occurrence *fast;
+  Occurrence *slow;
+  slow = source;
+  fast = source->next;
+  while (fast != NULL) {
+    fast = fast->next;
+    if (fast != NULL) {
+      slow = slow->next;
+      fast = fast->next;
+    }
+  }
+  *front = source;
+  *back = slow->next;
+  slow->next = NULL;
+}
+
+// Helper to merge sorted lists (Sorted by Frequency DESC)
+Occurrence *merge_lists(Occurrence *a, Occurrence *b) {
+  Occurrence *result = NULL;
+  if (a == NULL)
+    return b;
+  if (b == NULL)
+    return a;
+
+  if (a->frequency >= b->frequency) {
+    result = a;
+    result->next = merge_lists(a->next, b);
+  } else {
+    result = b;
+    result->next = merge_lists(a, b->next);
+  }
+  return result;
+}
+
+// Main merge sort function
+void sort_occurrences(Occurrence **head_ref) {
+  Occurrence *head = *head_ref;
+  Occurrence *a;
+  Occurrence *b;
+  if ((head == NULL) || (head->next == NULL)) {
+    return;
+  }
+  split_list(head, &a, &b);
+  sort_occurrences(&a);
+  sort_occurrences(&b);
+  *head_ref = merge_lists(a, b);
+}
+
 Occurrence *search_keyword(InvertedIndex *idx, const char *keyword) {
   // FIX 2: Hash function takes 1 arg. Modulo must be applied to the result.
   unsigned int h = hash(keyword) % idx->size;
 
   IndexEntry *entry = idx->buckets[h];
   while (entry) {
-    if (strcmp(entry->word, keyword) == 0)
+    if (strcmp(entry->word, keyword) == 0) {
+      // Sort results by frequency before returning if list > 1
+      if (entry->occurrences && entry->occurrences->next) {
+        sort_occurrences(&entry->occurrences);
+      }
       return entry->occurrences;
+    }
     entry = entry->next;
   }
   return NULL;
@@ -280,6 +339,7 @@ Occurrence *search_sentence(InvertedIndex *idx, const char *query) {
           tail->next = new_node;
           tail = new_node;
         }
+        break;
       }
     }
     curr = curr->next;
@@ -296,14 +356,21 @@ void free_index(InvertedIndex *idx) {
     IndexEntry *entry = idx->buckets[i];
     while (entry) {
       IndexEntry *next_entry = entry->next;
+
+      // Free word copy
+      free(entry->word);
+
+      // Free occurrences
       Occurrence *occ = entry->occurrences;
       while (occ) {
         Occurrence *next_occ = occ->next;
-        free(occ->positions);
+        if (occ->positions) {
+          free(occ->positions);
+        }
         free(occ);
         occ = next_occ;
       }
-      free(entry->word);
+
       free(entry);
       entry = next_entry;
     }
@@ -312,47 +379,193 @@ void free_index(InvertedIndex *idx) {
   free(idx);
 }
 
-// -----------------------------------------------------------------------------
-// File Registry
-// -----------------------------------------------------------------------------
+// ============================================================================
+// PERSISTENCE IMPLEMENTATION
+// ============================================================================
 
-FileRegistry *create_file_registry() {
-  FileRegistry *reg = (FileRegistry *)malloc(sizeof(FileRegistry));
-  if (reg) {
-    reg->count = 0;
-  }
-  return reg;
-}
+// Binary File Header Structure (implied)
+// [4 bytes] Magic Number: "MINI" (0x494E494D)
+// [4 bytes] Version: 1
+// [4 bytes] Index Size (number of buckets)
 
-void register_file(FileRegistry *reg, int file_id, const char *filepath,
-                   long size, int words, int sentences, int pages) {
-  if (!reg || reg->count >= MAX_FILES)
+#define MAGIC_NUMBER 0x494E494D
+#define INDEX_VERSION 1
+
+void save_index(InvertedIndex *idx, const char *filename) {
+  if (!idx || !filename)
     return;
 
-  FileMetadata *meta = &reg->files[reg->count++];
-  meta->file_id = file_id;
-  strncpy(meta->filename, filepath, MAX_FILENAME_LEN - 1);
-  meta->filename[MAX_FILENAME_LEN - 1] = '\0';
-  meta->size_bytes = size;
-  meta->word_count = words;
-  meta->sentence_count = sentences;
-  meta->page_count = pages;
+  FILE *f = fopen(filename, "wb");
+  if (!f) {
+    perror("Failed to open index file for writing");
+    return;
+  }
+
+  // 1. Write Header
+  int magic = MAGIC_NUMBER;
+  int version = INDEX_VERSION;
+  fwrite(&magic, sizeof(int), 1, f);
+  fwrite(&version, sizeof(int), 1, f);
+  fwrite(&idx->size, sizeof(int), 1, f);
+
+  // 2. Write Buckets
+  for (int i = 0; i < idx->size; i++) {
+    IndexEntry *entry = idx->buckets[i];
+    if (!entry)
+      continue; // Skip empty buckets
+
+    // Count entries in this bucket
+    int entry_count = 0;
+    IndexEntry *temp = entry;
+    while (temp) {
+      entry_count++;
+      temp = temp->next;
+    }
+
+    // Write Bucket Info: [Index] [Count]
+    fwrite(&i, sizeof(int), 1, f);
+    fwrite(&entry_count, sizeof(int), 1, f);
+
+    // Write Entries
+    entry = idx->buckets[i];
+    while (entry) {
+      // Write Word: [Length] [Chars]
+      int word_len = strlen(entry->word);
+      fwrite(&word_len, sizeof(int), 1, f);
+      fwrite(entry->word, sizeof(char), word_len, f);
+
+      // Count Occurrences
+      int occ_count = 0;
+      Occurrence *occ = entry->occurrences;
+      while (occ) {
+        occ_count++;
+        occ = occ->next;
+      }
+      fwrite(&occ_count, sizeof(int), 1, f);
+
+      // Write Occurrences
+      occ = entry->occurrences;
+      while (occ) {
+        fwrite(&occ->file_id, sizeof(int), 1, f);
+        fwrite(&occ->sentence_id, sizeof(int), 1, f);
+        fwrite(&occ->page_number, sizeof(int), 1, f);
+        fwrite(&occ->sentence_offset, sizeof(long), 1, f);
+        fwrite(&occ->sentence_len, sizeof(int), 1, f);
+        fwrite(&occ->frequency, sizeof(int), 1, f);
+        // Note: We write first position but positions array is not fully
+        // serialized in this v1
+        fwrite(&occ->position, sizeof(int), 1, f);
+        occ = occ->next;
+      }
+
+      entry = entry->next;
+    }
+  }
+
+  // Write End Marker for Buckets (Index = -1)
+  int marker = -1;
+  fwrite(&marker, sizeof(int), 1, f);
+
+  fclose(f);
+  printf("Index saved to '%s'\n", filename);
 }
 
-void print_file_registry(FileRegistry *reg) {
-  if (!reg)
-    return;
+InvertedIndex *load_index(const char *filename) {
+  FILE *f = fopen(filename, "rb");
+  if (!f)
+    return NULL;
 
-  printf("\n%-8s | %-30s | %-10s | %-8s | %-10s | %-6s\n", "ID", "Filename",
-         "Size(KB)", "Words", "Sentences", "Pages");
-  printf("---------|--------------------------------|------------|----------|--"
-         "----------|-------\n");
-
-  for (int i = 0; i < reg->count; i++) {
-    FileMetadata *m = &reg->files[i];
-    printf("%-8d | %-30s | %-10ld | %-8d | %-10d | %-6d\n", m->file_id,
-           m->filename, m->size_bytes / 1024, m->word_count, m->sentence_count,
-           m->page_count);
+  // 1. Read Header
+  int magic, version, size;
+  if (fread(&magic, sizeof(int), 1, f) != 1 || magic != MAGIC_NUMBER) {
+    // Not a valid index file
+    fclose(f);
+    return NULL;
   }
-  printf("\n");
+  if (fread(&version, sizeof(int), 1, f) != 1 || version != INDEX_VERSION) {
+    fprintf(stderr, "Index version mismatch. Expected %d, got %d\n",
+            INDEX_VERSION, version);
+    fclose(f);
+    return NULL;
+  }
+  if (fread(&size, sizeof(int), 1, f) != 1) {
+    fclose(f);
+    return NULL;
+  }
+
+  // Create Index
+  InvertedIndex *idx = create_index(size);
+  if (!idx) {
+    fclose(f);
+    return NULL;
+  }
+
+  // 2. Read Buckets
+  while (1) {
+    int bucket_idx;
+    if (fread(&bucket_idx, sizeof(int), 1, f) != 1)
+      break;
+
+    if (bucket_idx == -1)
+      break; // End marker
+
+    int entry_count;
+    fread(&entry_count, sizeof(int), 1, f);
+
+    // Read Entries
+    IndexEntry **bucket_ptr = &idx->buckets[bucket_idx];
+
+    for (int j = 0; j < entry_count; j++) {
+      // Read Word
+      int word_len;
+      fread(&word_len, sizeof(int), 1, f);
+      char *word = (char *)malloc(word_len + 1);
+      fread(word, sizeof(char), word_len, f);
+      word[word_len] = '\0';
+
+      // Create Entry
+      IndexEntry *new_entry = (IndexEntry *)malloc(sizeof(IndexEntry));
+      new_entry->word = word;
+      new_entry->occurrences = NULL;
+      new_entry->next = NULL;
+
+      // Read Occurrences
+      int occ_count;
+      fread(&occ_count, sizeof(int), 1, f);
+
+      Occurrence **occ_ptr = &new_entry->occurrences;
+      for (int k = 0; k < occ_count; k++) {
+        Occurrence *new_occ = (Occurrence *)malloc(sizeof(Occurrence));
+        fread(&new_occ->file_id, sizeof(int), 1, f);
+        fread(&new_occ->sentence_id, sizeof(int), 1, f);
+        fread(&new_occ->page_number, sizeof(int), 1, f);
+        fread(&new_occ->sentence_offset, sizeof(long), 1, f);
+        fread(&new_occ->sentence_len, sizeof(int), 1, f);
+        fread(&new_occ->frequency, sizeof(int), 1, f);
+        int position;
+        fread(&position, sizeof(int), 1, f);
+        new_occ->position = position; // Restore first position
+
+        new_occ->next = NULL;
+
+        // Partially restore positions array (v1 limitation: only first position
+        // restored) This allows basic search but might limit precise phrase
+        // searching to first instance
+        new_occ->capacity = 1;
+        new_occ->positions = (int *)malloc(sizeof(int));
+        new_occ->positions[0] = position;
+
+        *occ_ptr = new_occ;
+        occ_ptr = &new_occ->next;
+      }
+
+      // Append to Bucket
+      *bucket_ptr = new_entry;
+      bucket_ptr = &new_entry->next;
+    }
+  }
+
+  fclose(f);
+  printf("Index loaded from '%s' (%d buckets)\n", filename, size);
+  return idx;
 }

@@ -731,11 +731,17 @@ async def search(query: str):
                         
                         # Clean up CSV markers if present
                         if "[row]" in sentence_text.lower():
-                            # Find and extract content between [ROW] and [ENDROW]
-                            row_start = sentence_text.lower().find("[row]")
-                            row_end = sentence_text.lower().find("[endrow]")
-                            if row_start != -1 and row_end != -1:
-                                sentence_text = sentence_text[row_start+5:row_end].strip()
+                            # Fix: Use relative offset to find the CORRECT row (not the previous one from context)
+                            match_rel_start = int(parts[3]) - offset
+                            
+                            # Look for [row] starting near the match (it should be the start of the sentence)
+                            # We search backwards from match_start + small buffer to catch it
+                            row_start = sentence_text.lower().rfind("[row]", 0, match_rel_start + 10)
+                            
+                            if row_start != -1:
+                                row_end = sentence_text.lower().find("[endrow]", row_start)
+                                if row_end != -1:
+                                    sentence_text = sentence_text[row_start+5:row_end].strip()
                 except Exception as e:
                     logger.error(f"Error reading sentence text: {e}")
                 
