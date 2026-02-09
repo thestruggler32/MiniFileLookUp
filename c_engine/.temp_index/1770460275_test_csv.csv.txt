@@ -1,3 +1,0 @@
-[PAGE:1] The ID is 1. The Name is Apple. The Description is A red fruit that is sweet..
-The ID is 2. The Name is Banana. The Description is A yellow fruit that is long A yellow fruit..
-The ID is 3. The Name is Carrot. The Description is An orange vegetable..

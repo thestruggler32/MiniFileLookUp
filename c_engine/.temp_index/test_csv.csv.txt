@@ -1,4 +1,0 @@
-[PAGE:1] ID Name Description
-1 Apple A red fruit that is sweet.
-2 Banana A yellow fruit that is long A yellow fruit.
-3 Carrot An orange vegetable.

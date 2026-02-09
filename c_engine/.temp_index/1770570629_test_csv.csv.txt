@@ -1,3 +1,0 @@
-[PAGE:1] [ROW] ID: 1 | Name: Apple | Description: A red fruit that is sweet. [ENDROW]
-[ROW] ID: 2 | Name: Banana | Description: A yellow fruit that is long A yellow fruit. [ENDROW]
-[ROW] ID: 3 | Name: Carrot | Description: An orange vegetable. [ENDROW]
