@@ -69,7 +69,7 @@ if exist "c_engine\engine.exe" goto CEngineExists
 
 echo Compiling C engine...
 pushd c_engine\src
-gcc main.c trie.c index.c -o ..\engine.exe
+gcc main.c trie.c index.c fm_index.c -o ..\engine.exe -O2
 if errorlevel 1 goto CompileError
 popd
 echo [OK] C engine compiled successfully.

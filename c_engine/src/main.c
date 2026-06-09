@@ -52,6 +52,7 @@
 
 #include "../include/index.h"
 #include "../include/trie.h"
+#include "../include/fm_index.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -172,66 +173,38 @@ void process_text_buffer(InvertedIndex *idx, TrieNode *trie, int file_id,
 // Global Registry
 FileRegistry *file_registry = NULL;
 
-// Reads a file into a buffer and indexes it
+// Reads a file into the FM-Index and registers metadata.
+// The heavy lifting (parsing, BWT rebuild, etc.) is done by fm_index_file().
 void index_file(InvertedIndex *idx, TrieNode *trie, int file_id,
                 const char *filepath) {
-  if (!filepath || strlen(filepath) == 0)
-    return;
+  (void)trie;  /* trie.c now delegates to the FM-Index global singleton */
 
-  FILE *f = fopen(filepath, "rb");
-  if (!f) {
-    fprintf(stderr, "Error: Could not open file '%s'. Reason: %s\n", filepath,
-            strerror(errno));
-    return;
-  }
+  if (!filepath || strlen(filepath) == 0) return;
 
-  fseek(f, 0, SEEK_END);
-  long length = ftell(f);
-  fseek(f, 0, SEEK_SET);
-
-  // REMOVED 1MB LIMIT CHECK.
-  // We now allocate exactly what we need.
-  // Note: malloc might fail if file is larger than available RAM.
-  // Ideally we would check for a sane upper bound (e.g. 2GB)
-  // but for "Scalability" mandate, we remove the arbitrary 1MB cap.
-
-  char *buffer = (char *)malloc(length + 1);
-  if (!buffer) {
-    fprintf(stderr,
-            "Error: Failed to allocate memory for file '%s' (%ld bytes)\n",
-            filepath, length);
-    fclose(f);
+  if (!idx || !idx->fm) {
+    fprintf(stderr, "Error: FM-Index not initialised\n");
     return;
   }
 
-  size_t read_bytes = fread(buffer, 1, length, f);
-  if (read_bytes != length) {
-    fprintf(stderr, "Warning: Read fewer bytes than expected from '%s'\n",
-            filepath);
+  /* Delegate all indexing to the FM-Index engine */
+  if (fm_index_file(idx->fm, file_id, filepath) != 0) {
+    fprintf(stderr, "Error: FM-Index failed for '%s'\n", filepath);
+    return;
   }
-  buffer[length] = '\0'; // Null-terminate
-  fclose(f);
 
-  // Skip UTF-16 check for brevity (assumed handled by extractor.py or plain
-  // ASCII)
-
-  printf("Indexing File ID %d: %s (%ld bytes)\n", file_id, filepath, length);
-  fflush(stdout);
-
-  int total_words = 0;
-  int total_sentences = 0;
-  int total_pages = 1;
-
-  process_text_buffer(idx, trie, file_id, buffer, &total_words,
-                      &total_sentences, &total_pages);
-
-  // Register file metadata
+  /* Sync the global FileRegistry (used by the 'files' command) from the
+   * FM-Index's own registry, which was updated by fm_index_file(). */
   if (file_registry) {
-    register_file(file_registry, file_id, filepath, length, total_words,
-                  total_sentences, total_pages);
+    for (int i = 0; i < idx->fm->registry.count; i++) {
+      const FMFileRecord *fr = &idx->fm->registry.files[i];
+      if (fr->file_id == file_id) {
+        register_file(file_registry, file_id, fr->filename,
+                      fr->size_bytes, fr->word_count,
+                      fr->sentence_count, fr->page_count);
+        break;
+      }
+    }
   }
-
-  free(buffer);
 }
 
 // -----------------------------------------------------------------------------
@@ -283,12 +256,26 @@ void run_interactive_mode(InvertedIndex *idx, TrieNode *trie) {
 
 #define MAX_ARGS 32
   char *args[MAX_ARGS];
+  (void)args;  /* declared for legacy compatibility; parsed via strtok below */
 
   while (1) {
     printf("> ");
     fflush(stdout);
     if (!fgets(line, sizeof(line), stdin))
       break;
+
+    /* Buffer overflow guard: if the input line is longer than the buffer,
+     * the newline will be missing.  Drain stdin to keep it in sync. */
+    {
+      size_t linelen = strlen(line);
+      if (linelen == sizeof(line) - 1 && line[linelen - 1] != '\n') {
+        int ch;
+        while ((ch = getchar()) != '\n' && ch != EOF) {}
+        fprintf(stderr,
+                "Warning: input truncated to %d bytes — line was too long.\n",
+                (int)(sizeof(line) - 1));
+      }
+    }
 
     line[strcspn(line, "\n")] = 0;
     if (strlen(line) == 0)
@@ -327,7 +314,16 @@ void run_interactive_mode(InvertedIndex *idx, TrieNode *trie) {
 
       Occurrence *results = search_sentence(idx, arg);
       print_search_results(results);
-      // results list leaks here in interactive mode (should free list nodes)
+      /* Phase 3 fix: free the freshly-allocated Occurrence list */
+      {
+        Occurrence *cur = results;
+        while (cur) {
+          Occurrence *nxt = cur->next;
+          free(cur->positions);  /* may be NULL — free(NULL) is safe */
+          free(cur);
+          cur = nxt;
+        }
+      }
 
     } else if (strcmp(cmd, "autocomplete") == 0) {
       char *prefix = strtok(NULL, delim);
@@ -336,6 +332,9 @@ void run_interactive_mode(InvertedIndex *idx, TrieNode *trie) {
         continue;
       }
       autocomplete(trie, prefix);
+
+    } else if (strcmp(cmd, "files") == 0) {
+      print_file_registry(file_registry);
 
     } else if (strcmp(cmd, "save") == 0) {
       save_index(idx, INDEX_FILENAME);
