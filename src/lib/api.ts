@@ -28,7 +28,31 @@ export interface SearchResponse {
     hits: SearchHit[];
 }
 
-const BASE_URL = "http://127.0.0.1:8000";
+/**
+ * Dynamically resolves the API base URL.
+ *
+ * Priority order:
+ *  1. NEXT_PUBLIC_API_URL env var (set in .env.local for production deployments)
+ *  2. On the browser: same hostname as the page, but on port 8000
+ *     (works when both Next.js and FastAPI are on the same machine, accessed
+ *      from another device by IP — e.g. http://192.168.1.5:3000 → :8000)
+ *  3. Fallback: http://127.0.0.1:8000 (same-machine dev only)
+ */
+function getBaseUrl(): string {
+    if (process.env.NEXT_PUBLIC_API_URL) {
+        return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, "");
+    }
+    if (typeof window !== "undefined") {
+        // Use the same hostname the browser used to reach the Next.js frontend,
+        // but switch to port 8000 for FastAPI.
+        const { protocol, hostname } = window.location;
+        return `${protocol}//${hostname}:8000`;
+    }
+    return "http://127.0.0.1:8000";
+}
+
+const BASE_URL = getBaseUrl();
+
 
 export async function search(query: string): Promise<SearchResponse> {
     if (!query) return { query: "", total_hits: 0, hits: [] };

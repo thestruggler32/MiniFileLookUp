@@ -81,6 +81,7 @@ import subprocess
 import threading
 import logging
 import asyncio
+import uuid
 import re
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, File, UploadFile, HTTPException, Query
@@ -606,14 +607,12 @@ async def index_files(files: List[UploadFile] = File(...)):
             content = extract_text_with_pages(upload_path)
             
             if content and content.strip():
-                
-                # Write to clean .txt file for C engine
-                txt_filename = f"{safe_name}.txt".replace(" ", "_")
+
+                # Guarantee a unique filename: uuid prefix + sanitised original name
+                # This prevents two uploads of "report.pdf" from colliding in .temp_index.
+                unique_prefix = uuid.uuid4().hex[:8]
+                txt_filename = f"{unique_prefix}_{safe_name}.txt"
                 txt_path = os.path.join(INDEX_TEMP_DIR, txt_filename)
-                
-                # Ensure unique path
-                if os.path.exists(txt_path):
-                     txt_path = os.path.join(INDEX_TEMP_DIR, f"{int(time.time())}_{txt_filename}")
 
                 try:
                     with open(txt_path, "w", encoding="utf-8") as f:
@@ -630,26 +629,20 @@ async def index_files(files: List[UploadFile] = File(...)):
             except:
                 pass
 
-        # 2. Send to C Engine
-        if temp_txt_paths:
-            # CRITICAL FIX: Use absolute paths with forward slashes (verified in debug_glue.py)
-            safe_paths = []
-            for p in temp_txt_paths:
-                abs_path = os.path.abspath(p)
-                safe_path = abs_path.replace(os.sep, '/')  # Forward slashes for C engine
-                safe_paths.append(safe_path)
-            
-            cmd = "index " + " ".join(safe_paths)
-            
+        # 2. Send to C Engine — one command per file.
+        # The interactive shell parses only the first path argument after "index",
+        # so batching multiple paths in one command would silently skip all but the first.
+        for p in temp_txt_paths:
+            abs_path = os.path.abspath(p)
+            safe_path = abs_path.replace(os.sep, '/')  # Forward slashes for C engine
+            cmd = f"index {safe_path}"
             logger.info(f"Sending command: {repr(cmd)}")
             output = await engine.send_command(cmd)
             logger.info(f"Engine output: {repr(output)}")
-            
+
+        if temp_txt_paths:
             # Refresh file map to include newly indexed files
             await engine.refresh_file_map()
-            
-            # Count the files that were successfully prepared and sent
-            indexed_count = len(temp_txt_paths)
         
         # 3. Return updated file list (Source of Truth)
         current_files = await list_files()
