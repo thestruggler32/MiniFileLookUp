@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <math.h>
 
 /* ============================================================================
  * FILE REGISTRY (used by main.c's "files" command)
@@ -53,7 +54,9 @@ void register_file(FileRegistry *reg, int file_id, const char *filepath,
 /*
  * print_file_registry:
  *   Format expected by api.py:
- *     "<id> | <filepath> | <size_kb> | <words> | <sentences> | <pages>"
+ *     "<id> | <filepath> | <size_bytes> | <words> | <sentences> | <pages>"
+ *   NOTE: we output raw bytes (not KB) so Python can display accurate sizes
+ *   for files smaller than 1 KB.
  */
 void print_file_registry(FileRegistry *reg) {
     if (!reg) return;
@@ -61,7 +64,7 @@ void print_file_registry(FileRegistry *reg) {
         const FileMetadata *m = &reg->files[i];
         printf("%d | %s | %ld | %d | %d | %d\n",
                m->file_id, m->filename,
-               m->size_bytes / 1024,
+               m->size_bytes,        /* raw bytes */
                m->word_count, m->sentence_count, m->page_count);
     }
 }
@@ -217,6 +220,36 @@ static Occurrence *core_search(const FMIndex *fm, const char *lc_query) {
             if (!head) { head = tail = occ; }
             else        { tail->next = occ; tail = occ; }
         }
+    }
+
+    /* --- BM25 Scoring --- */
+    int df = 0;
+    for (Occurrence *cur = head; cur; cur = cur->next) df++;
+    
+    int N = fm->positions.count; /* Total number of sentences in corpus */
+    if (N == 0) N = 1;
+    
+    /* Calculate IDF (Inverse Document Frequency) */
+    float idf = logf( (float)(N - df + 0.5f) / (float)(df + 0.5f) + 1.0f );
+    
+    const float k1 = 1.2f;
+    const float b  = 0.75f;
+    /* We approximate avg sentence length as 100 bytes */
+    const float avgdl = 100.0f; 
+
+    for (Occurrence *cur = head; cur; cur = cur->next) {
+        float tf = (float)cur->frequency;
+        float dl = (float)cur->sentence_len;
+        
+        float num = tf * (k1 + 1.0f);
+        float den = tf + k1 * (1.0f - b + b * (dl / avgdl));
+        
+        cur->score = idf * (num / den);
+        
+        /* Format explanation */
+        snprintf(cur->explanation, sizeof(cur->explanation),
+                 "BM25 Score: %.2f (IDF: %.2f, TF-Weight: %.2f)", 
+                 cur->score, idf, (num/den));
     }
 
     return head;

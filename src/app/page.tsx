@@ -5,6 +5,7 @@ import { SearchBar } from "@/components/SearchBar"
 import { SearchResults } from "@/components/SearchResults"
 import { FileManagement } from "@/components/FileManagement"
 import { IndexedFiles } from "@/components/IndexedFiles"
+import { TelemetryDashboard } from "@/components/TelemetryDashboard"
 import { search, autocomplete, checkHealth, SearchResponse } from "@/lib/api"
 import { AlertCircle, CheckCircle2 } from "lucide-react"
 
@@ -103,6 +104,12 @@ export default function Home() {
             <p className="text-muted-foreground max-w-[600px] text-lg mx-auto lg:mx-0">
               Fast, secure, and purely local. Index your documents and search with speed.
             </p>
+            <div className="pt-2">
+              <a href="/simulation" className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600/10 text-indigo-600 hover:bg-indigo-600/20 hover:text-indigo-700 font-semibold rounded-md transition-colors border border-indigo-600/20">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                Launch Live FM-Index Simulation
+              </a>
+            </div>
           </div>
 
           {/* Search Section */}
@@ -115,6 +122,8 @@ export default function Home() {
               className="shadow-xl"
             />
           </div>
+
+          <TelemetryDashboard />
 
           {/* Results Section */}
           <div className="w-full animate-in fade-in slide-in-from-bottom-4 duration-500">

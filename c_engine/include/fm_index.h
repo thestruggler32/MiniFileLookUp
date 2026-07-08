@@ -175,4 +175,7 @@ FMIndex *fm_load(const char *filename);
 void     fm_set_global(FMIndex *fm);
 FMIndex *fm_get_global(void);
 
+/* Telemetry / Statistics */
+void     fm_stat_memory(const FMIndex *fm, long *bwt_sz, long *wm_sz, long *ssa_sz, long *corpus_sz);
+
 #endif /* FM_INDEX_H */

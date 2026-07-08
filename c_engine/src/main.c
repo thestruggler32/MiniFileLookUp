@@ -216,14 +216,14 @@ void print_search_results(Occurrence *occ) {
     printf("No results found.\n");
     return;
   }
-  printf("%-10s %-12s %-10s %-12s %-10s %-10s\n", "File ID", "Page", "Sentence",
-         "Offset", "Length", "Frequency");
+  printf("%-10s %-12s %-10s %-12s %-10s %-10s %-10s %-30s\n", "File ID", "Page", "Sentence",
+         "Offset", "Length", "Frequency", "Score", "Explanation");
   printf("---------------------------------------------------------------------"
-         "-----------\n");
+         "--------------------------------------------------\n");
   while (occ) {
-    printf("%-10d %-12d %-10d %-12ld %-10d %-10d\n", occ->file_id,
+    printf("%-10d %-12d %-10d %-12ld %-10d %-10d %-10.2f | %s\n", occ->file_id,
            occ->page_number, occ->sentence_id, occ->sentence_offset,
-           occ->sentence_len, occ->frequency);
+           occ->sentence_len, occ->frequency, occ->score, occ->explanation);
     occ = occ->next;
   }
 }
@@ -291,6 +291,9 @@ void run_interactive_mode(InvertedIndex *idx, TrieNode *trie) {
       printf("  index <path>       : Index a file\n");
       printf("  search <query>     : Search for a word or phrase\n");
       printf("  autocomplete <pre> : Get suggestions\n");
+      printf("  autocomplete <pre> : Get suggestions\n");
+      printf("  files              : List indexed files\n");
+      printf("  telemetry          : Show memory usage statistics\n");
       printf("  save               : Save index to disk\n");
       printf("  exit               : Save and exit\n");
 
@@ -299,6 +302,16 @@ void run_interactive_mode(InvertedIndex *idx, TrieNode *trie) {
       while (path) {
         index_file(idx, trie, session_file_id_counter++, path);
         path = strtok(NULL, delim);
+      }
+
+    } else if (strcmp(cmd, "telemetry") == 0) {
+      if (idx && idx->fm) {
+        long bwt_sz=0, wm_sz=0, ssa_sz=0, corpus_sz=0;
+        fm_stat_memory(idx->fm, &bwt_sz, &wm_sz, &ssa_sz, &corpus_sz);
+        printf("[TELEMETRY] BWT: %ld | WaveletTree: %ld | SampledSA: %ld | Corpus: %ld\n", 
+               bwt_sz, wm_sz, ssa_sz, corpus_sz);
+      } else {
+        printf("[TELEMETRY] Index not loaded.\n");
       }
 
     } else if (strcmp(cmd, "search") == 0) {

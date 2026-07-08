@@ -80,6 +80,37 @@ export async function autocomplete(prefix: string): Promise<string[]> {
     }
 }
 
+export interface TelemetryData {
+    bwt_size_bytes: number;
+    wm_size_bytes: number;
+    ssa_size_bytes: number;
+    corpus_size_bytes: number;
+    total_index_size_bytes: number;
+    compression_ratio: number;
+}
+
+export async function getTrending(): Promise<string[]> {
+    try {
+        const res = await fetch(`${BASE_URL}/trending`);
+        if (!res.ok) return [];
+        return await res.json();
+    } catch (e) {
+        console.error("Failed to fetch trending searches", e);
+        return [];
+    }
+}
+
+export async function getTelemetry(): Promise<TelemetryData | null> {
+    try {
+        const res = await fetch(`${BASE_URL}/telemetry`);
+        if (!res.ok) return null;
+        return await res.json();
+    } catch (e) {
+        console.error("Failed to fetch telemetry", e);
+        return null;
+    }
+}
+
 export async function indexFiles(files: File[]): Promise<IndexResponse> {
     const formData = new FormData();
     files.forEach(file => formData.append('files', file));

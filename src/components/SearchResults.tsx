@@ -81,8 +81,18 @@ export function SearchResults({ results, query }: SearchResultsProps) {
                                             {match.sentence_text || "Match found"}
                                         </p>
                                     </div>
-                                    <div className="ml-auto text-xs font-mono bg-primary/10 text-primary px-2 py-1 rounded-full shrink-0">
-                                        {match.frequency}x
+                                    <div className="ml-auto flex flex-col items-end gap-1 shrink-0 group/score">
+                                        <div className="text-xs font-mono bg-primary/10 text-primary px-2 py-1 rounded-full flex items-center gap-1 cursor-help">
+                                            Score: {match.score?.toFixed(2) || "0.00"}
+                                        </div>
+                                        {match.explanation && (
+                                            <div className="absolute opacity-0 group-hover/score:opacity-100 transition-opacity bg-popover text-popover-foreground text-[10px] p-2 rounded border shadow-lg z-50 -mt-10 right-4 pointer-events-none whitespace-nowrap">
+                                                {match.explanation}
+                                            </div>
+                                        )}
+                                        <div className="text-[10px] text-muted-foreground font-mono px-1">
+                                            Freq: {match.frequency}x
+                                        </div>
                                     </div>
                                 </div>
                             ))}

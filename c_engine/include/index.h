@@ -14,6 +14,8 @@ typedef struct Occurrence {
   int   frequency;       /* number of query hits in this sentence             */
   int  *positions;       /* per-word positions (NULL in FM-Index results)     */
   int   capacity;
+  float score;           /* BM25 or relevance score                           */
+  char  explanation[128];/* Mathematical breakdown of the score               */
   struct Occurrence *next;
 } Occurrence;
 

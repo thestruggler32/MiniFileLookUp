@@ -151,6 +151,25 @@ static int wm_build(WaveletMatrix *wm, const unsigned char *seq, int n) {
     return 0;
 }
 
+/* ============================================================================
+ * SECTION 12 — TELEMETRY
+ * ========================================================================== */
+
+void fm_stat_memory(const FMIndex *fm, long *bwt_sz, long *wm_sz, long *ssa_sz, long *corpus_sz) {
+    if (!fm) return;
+    
+    *bwt_sz = fm->bwt_len * sizeof(unsigned char);
+    *corpus_sz = fm->corpus_len * sizeof(unsigned char);
+    
+    *wm_sz = 0;
+    for (int i = 0; i < FM_LOG_SIGMA; i++) {
+        *wm_sz += fm->wm.levels[i].n_words * sizeof(uint64_t);
+        *wm_sz += fm->wm.levels[i].n_samples * sizeof(uint32_t);
+    }
+    
+    *ssa_sz = fm->ssa.n_samples * sizeof(int);
+}
+
 /*
  * wm_rank(wm, c, i):
  *   Count of byte c in seq[0..i)  (exclusive upper bound).

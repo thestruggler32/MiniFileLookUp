@@ -89,6 +89,33 @@ from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
+import collections
+
+# Adaptive / Usage-Driven Layer
+query_frequency = collections.Counter()
+
+class LRUCache:
+    """Least Recently Used (LRU) cache for search queries."""
+    def __init__(self, capacity: int = 100):
+        self.cache = collections.OrderedDict()
+        self.capacity = capacity
+
+    def get(self, key: str):
+        if key not in self.cache:
+            return None
+        self.cache.move_to_end(key)
+        return self.cache[key]
+
+    def put(self, key: str, value: Any):
+        self.cache[key] = value
+        self.cache.move_to_end(key)
+        if len(self.cache) > self.capacity:
+            self.cache.popitem(last=False)
+            
+    def clear(self):
+        self.cache.clear()
+
+search_cache = LRUCache(100)
 
 # ============================================================================
 # TEXT EXTRACTION MODULE
@@ -113,6 +140,13 @@ INDEX_TEMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".temp
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("api")
 
+# --- HELPER FUNCTIONS ---
+def strip_uuid_prefix(filename: str) -> str:
+    """Removes the 36-character UUID prefix if present."""
+    if "_" in filename and len(filename.split("_", 1)[0]) in (32, 36):
+        return filename.split("_", 1)[1]
+    return filename
+
 # --- STRICT TYPE DEFINITIONS ---
 class FileMetadata(BaseModel):
     file_id: int
@@ -134,11 +168,22 @@ class SearchHit(BaseModel):
     sentence_id: int
     sentence_text: str = ""
     frequency: int
+    score: float = 0.0
+    explanation: str = ""
 
 class SearchResponse(BaseModel):
     query: str
     total_hits: int
     hits: List[SearchHit]
+
+class TelemetryData(BaseModel):
+    bwt_size_bytes: int
+    wm_size_bytes: int
+    ssa_size_bytes: int
+    corpus_size_bytes: int
+    total_index_size_bytes: int
+    compression_ratio: float
+
 
 class HealthResponse(BaseModel):
     status: str
@@ -345,17 +390,25 @@ async def list_files():
         parts = [p.strip() for p in line.split('|')]
         if len(parts) >= 6 and parts[0].isdigit():
             try:
+                fid = int(parts[0])
                 full_path = parts[1]
                 basename = os.path.basename(full_path)
-                
-                fid = int(parts[0])
-                # CRITCAL: Store FULL PATH for search retrieval, but return basename for UI
+
+                # Strip the 8-char uuid prefix we add on every upload
+                # e.g. "a3f9b2c1_report.pdf.txt" -> "report.pdf.txt"
+                clean_name = re.sub(r'^[0-9a-f]{8}_', '', basename)
+                # Strip trailing .txt to restore original extension
+                # e.g. "report.pdf.txt" -> "report.pdf"
+                if clean_name.lower().endswith('.txt') and '.' in clean_name[:-4]:
+                    clean_name = clean_name[:-4]
+
+                # Store FULL PATH for search retrieval, display clean name in UI
                 engine.file_map[fid] = full_path
-                
+
                 files.append(FileMetadata(
                     file_id=fid,
-                    filename=basename,
-                    size_bytes=int(parts[2]) * 1024,
+                    filename=clean_name,
+                    size_bytes=int(parts[2]),   # C engine outputs raw bytes now
                     word_count=int(parts[3]),
                     sentence_count=int(parts[4]),
                     page_count=int(parts[5])
@@ -410,7 +463,7 @@ def decode_symbols(text: str) -> str:
 
 def python_phrase_search(query: str, indexed_files: Dict[int, str]) -> List[SearchHit]:
     """
-    Robust Python-based phrase search (Gemini-enhanced).
+    Robust Python-based phrase search.
     Handles files with/without PAGE markers, extracts CSV [ROW] blocks.
     """
     results = []
@@ -643,6 +696,8 @@ async def index_files(files: List[UploadFile] = File(...)):
         if temp_txt_paths:
             # Refresh file map to include newly indexed files
             await engine.refresh_file_map()
+            # Clear cache because index has changed
+            search_cache.clear()
         
         # 3. Return updated file list (Source of Truth)
         current_files = await list_files()
@@ -662,6 +717,20 @@ async def search(query: str):
     if not query.strip():
         return SearchResponse(query=query, total_hits=0, hits=[])
     
+    query_clean = query.strip().lower()
+    
+    # Check LRU Cache
+    cached_result = search_cache.get(query_clean)
+    if cached_result:
+        print(f"[CACHE HIT] Returning cached results for '{query_clean}'")
+        # Still update frequency even on cache hit
+        query_frequency[query_clean] += 1
+        return cached_result
+    
+    # Track query frequency for adaptive trending
+    if query_clean:
+        query_frequency[query_clean] += 1
+    
     # HYBRID ROUTER: Detect complex queries
     is_complex = (
         len(query.split()) > 1 or  # Multi-word
@@ -676,21 +745,17 @@ async def search(query: str):
         python_hits = python_phrase_search(query, engine.file_map)
         print(f"   -> Found {len(python_hits)} results")
         
-        if python_hits:
-            return SearchResponse(query=query, total_hits=len(python_hits), hits=python_hits)
-        
-        # Fallback to Gemini if Python fails
-        print("[FALLBACK] Gemini fallback (Python returned 0)")
-        gemini_hits = await gemini_semantic_search(query, engine.file_map)
-        return SearchResponse(query=query, total_hits=len(gemini_hits), hits=gemini_hits)
+        response = SearchResponse(query=query, total_hits=len(python_hits), hits=python_hits)
+        search_cache.put(query_clean, response)
+        return response
     
     # Simple query: Try C engine first (faster)
-    safe_query = query.replace('"', '').lower()
-    cmd = f'sentence "{safe_query}"'
-    
+    safe_query = query.replace('"', '').replace("'", '').strip().lower()
+    cmd = f'search {safe_query}'
+
     print(f"[ROUTER] C engine (simple query): {cmd}")
     output = await engine.send_command(cmd)
-    
+
     hits = []
     # Parse C engine output
     start_parsing = False
@@ -703,81 +768,79 @@ async def search(query: str):
         if not start_parsing:
             continue
             
-        parts = line.split()
-        if len(parts) >= 6 and parts[0].isdigit():
-            try:
-                fid = int(parts[0])
-                full_path = engine.file_map.get(fid)
-                fname = os.path.basename(full_path) if full_path else f"File {fid}"
-                
-                # Retrieve Sentence Text with EXPANDED context
-                sentence_text = ""
+        parts = line.split("|")
+        if len(parts) >= 2:
+            left_parts = parts[0].split()
+            if len(left_parts) >= 6 and left_parts[0].isdigit():
                 try:
-                    # Read MORE context than C provides
-                    offset = max(0, int(parts[3]) - 100)
-                    length = int(parts[4]) + 300  # Read 300 extra chars
+                    fid = int(left_parts[0])
+                    page_num = int(left_parts[1])
+                    sent_id = int(left_parts[2])
+                    offset_val = int(left_parts[3])
+                    length_val = int(left_parts[4])
+                    freq = int(left_parts[5])
+                    score = float(left_parts[6]) if len(left_parts) > 6 else 0.0
+                    explanation = parts[1].strip()
+
+                    full_path = engine.file_map.get(fid)
+                    fname = os.path.basename(full_path) if full_path else f"File {fid}"
                     
-                    if full_path and os.path.exists(full_path):
-                        with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
-                            f.seek(offset)
-                            sentence_text = f.read(length).strip()
-                        
-                        # Clean up CSV markers if present
-                        if "[row]" in sentence_text.lower():
-                            # Fix: Use relative offset to find the CORRECT row (not the previous one from context)
-                            match_rel_start = int(parts[3]) - offset
+                    sentence_text = ""
+                    try:
+                        read_offset = max(0, offset_val - 100)
+                        read_length = length_val + 300
+                        if full_path and os.path.exists(full_path):
+                            with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
+                                f.seek(read_offset)
+                                sentence_text = f.read(read_length).strip()
                             
-                            # Look for [row] starting near the match (it should be the start of the sentence)
-                            # We search backwards from match_start + small buffer to catch it
-                            row_start = sentence_text.lower().rfind("[row]", 0, match_rel_start + 10)
-                            
-                            if row_start != -1:
-                                row_end = sentence_text.lower().find("[endrow]", row_start)
-                                if row_end != -1:
+                            if "[row]" in sentence_text.lower():
+                                match_rel_start = offset_val - read_offset
+                                row_start = sentence_text.lower().rfind("[row]", 0, match_rel_start + 10)
+                                row_end = sentence_text.lower().find("[endrow]", match_rel_start)
+                                if row_start != -1 and row_end != -1:
                                     sentence_text = sentence_text[row_start+5:row_end].strip()
-                except Exception as e:
-                    logger.error(f"Error reading sentence text: {e}")
-                
-                hits.append(SearchHit(
-                    file_id=fid,
-                    filename=fname,
-                    page_number=int(parts[1]),
-                    sentence_id=int(parts[2]),
-                    sentence_text=sentence_text, 
-                    frequency=int(parts[5])
-                ))
-            except ValueError:
-                continue
+                                else:
+                                    sentence_text = f"...{sentence_text[max(0, match_rel_start-30):match_rel_start + length_val + 30]}..."
+                            else:
+                                match_rel_start = offset_val - read_offset
+                                raw_snippet = sentence_text[max(0, match_rel_start-50):match_rel_start + length_val + 50]
+                                sentence_text = ' '.join(raw_snippet.split())
+                                sentence_text = f"...{sentence_text}..."
+                    except Exception as e:
+                        logger.error(f"Error reading sentence text: {e}")
+
+                    original_name = strip_uuid_prefix(fname)
+                    hits.append(SearchHit(
+                        file_id=fid,
+                        filename=original_name,
+                        page_number=page_num,
+                        sentence_id=sent_id,
+                        sentence_text=decode_symbols(sentence_text) or "Match found",
+                        frequency=freq,
+                        score=score,
+                        explanation=explanation
+                    ))
+                except ValueError:
+                    continue
     
     # If C engine found results, return them
     if hits:
         print(f"   -> C engine found {len(hits)} matches")
-        return SearchResponse(
+        response = SearchResponse(
             query=query,
             total_hits=len(hits),
             hits=hits
         )
+        search_cache.put(query_clean, response)
+        return response
     
     # FALLBACK: Use Python search
     print("[FALLBACK] Python fallback (C returned 0)")
     python_hits = python_phrase_search(query, engine.file_map)
-    
-    if python_hits:
-        return SearchResponse(
-            query=query,
-            total_hits=len(python_hits),
-            hits=python_hits
-        )
-    
-    # FINAL FALLBACK: Gemini
-    print("[FALLBACK] Gemini final fallback")
-    gemini_hits = await gemini_semantic_search(query, engine.file_map)
-    
-    return SearchResponse(
-        query=query,
-        total_hits=len(gemini_hits),
-        hits=gemini_hits
-    )
+    response = SearchResponse(query=query, total_hits=len(python_hits), hits=python_hits)
+    search_cache.put(query_clean, response)
+    return response
 
 @app.get("/autocomplete", response_model=List[str])
 async def autocomplete(prefix: str):
@@ -798,6 +861,42 @@ async def autocomplete(prefix: str):
             suggestions.append(suggestion)
             
     return suggestions
+
+@app.get("/trending", response_model=List[str])
+async def get_trending_searches():
+    """Returns top 5 most frequent searches."""
+    return [q for q, count in query_frequency.most_common(5)]
+
+@app.get("/telemetry", response_model=TelemetryData)
+async def get_telemetry():
+    """Fetches memory statistics from the C engine."""
+    output = await engine.send_command("telemetry")
+    # Expected output: [TELEMETRY] BWT: 1024 | WaveletTree: 2048 | SampledSA: 512 | Corpus: 4096
+    
+    bwt = wm = ssa = corpus = 0
+    
+    for line in output:
+        if line.startswith("[TELEMETRY] BWT:"):
+            try:
+                parts = line.split("|")
+                bwt = int(parts[0].split(":")[1].strip())
+                wm = int(parts[1].split(":")[1].strip())
+                ssa = int(parts[2].split(":")[1].strip())
+                corpus = int(parts[3].split(":")[1].strip())
+            except Exception as e:
+                logger.error(f"Failed to parse telemetry: {e}")
+                
+    total = bwt + wm + ssa
+    ratio = (total / corpus * 100) if corpus > 0 else 0.0
+    
+    return TelemetryData(
+        bwt_size_bytes=bwt,
+        wm_size_bytes=wm,
+        ssa_size_bytes=ssa,
+        corpus_size_bytes=corpus,
+        total_index_size_bytes=total,
+        compression_ratio=ratio
+    )
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)
